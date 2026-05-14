@@ -1,0 +1,7 @@
+build/bin
+node_modules
+frontend/dist
+.cache/
+Note/
+*test.go
+.DS_Store
