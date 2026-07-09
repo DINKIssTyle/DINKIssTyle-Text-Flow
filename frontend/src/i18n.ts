@@ -176,6 +176,17 @@ const enTranslations = {
     down: 'Down',
     left: 'Left',
     right: 'Right',
+    ttsSettings: 'TTS Settings',
+    ttsSettingsDescription: 'Configure Text-to-Speech engines and usage settings.',
+    enableTts: 'Enable TTS',
+    ttsUseAiResponse: 'Read AI response',
+    ttsUseShortcut: 'Read on shortcut key',
+    ttsEngine: 'TTS Engine',
+    osTts: 'macOS Native (say)',
+    supertonic3: 'Supertonic 3',
+    ttsShortcut: 'TTS Shortcut',
+    supertonicEndpoint: 'Supertonic API Endpoint',
+    supertonicVoice: 'Supertonic Voice',
 };
 
 export type TranslationKey = keyof typeof enTranslations;
@@ -351,6 +362,17 @@ const koTranslations: Record<TranslationKey, string> = {
     down: '아래',
     left: '왼쪽',
     right: '오른쪽',
+    ttsSettings: 'TTS 설정',
+    ttsSettingsDescription: 'TTS(텍스트 음성 변환) 엔진 및 사용처 설정을 구성합니다.',
+    enableTts: 'TTS 사용',
+    ttsUseAiResponse: 'AI 답변 시 읽기',
+    ttsUseShortcut: '단축키 입력 시 읽기',
+    ttsEngine: 'TTS 엔진',
+    osTts: 'macOS 기본 (say)',
+    supertonic3: 'Supertonic 3',
+    ttsShortcut: 'TTS 단축키',
+    supertonicEndpoint: 'Supertonic API 엔드포인트',
+    supertonicVoice: 'Supertonic 목소리',
 };
 
 const translations: Record<Language, Record<TranslationKey, string>> = {

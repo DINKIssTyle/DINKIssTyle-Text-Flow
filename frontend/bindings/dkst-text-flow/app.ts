@@ -140,6 +140,14 @@ export function SetLabelSnippetsEnabled(labelID: number, enabled: boolean): $Can
     return $Call.ByID(2389042794, labelID, enabled);
 }
 
+export function Speak(text: string): $CancellablePromise<void> {
+    return $Call.ByID(1892369553, text);
+}
+
+export function StopSpeaking(): $CancellablePromise<void> {
+    return $Call.ByID(3590611999);
+}
+
 export function ToggleSnippet(id: number, enabled: boolean): $CancellablePromise<storage$0.Snippet> {
     return $Call.ByID(3992326870, id, enabled);
 }

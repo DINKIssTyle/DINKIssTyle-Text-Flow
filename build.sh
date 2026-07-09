@@ -81,10 +81,6 @@ fi
 RESOURCE_DIR="$APP_PATH/Contents/Resources"
 mkdir -p "$RESOURCE_DIR"
 
-if [[ -f "$ROOT_DIR/build/darwin/appicon.icns" ]]; then
-  cp "$ROOT_DIR/build/darwin/appicon.icns" "$RESOURCE_DIR/iconfile.icns"
-fi
-
 if [[ -f "$ROOT_DIR/build/menu_icon.pdf" ]]; then
   cp "$ROOT_DIR/build/menu_icon.pdf" "$RESOURCE_DIR/menu_icon.pdf"
 fi
@@ -99,6 +95,12 @@ codesign \
   "$APP_PATH"
 
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+# Remove the standalone raw binary, leaving only the signed .app bundle
+rm -f "$ROOT_DIR/bin/$APP_NAME"
+
+# Update modification time to force macOS Finder to reload the app icon
+touch "$APP_PATH"
 
 echo
 echo "Signed app:"

@@ -40,4 +40,39 @@ export interface Settings {
     "useSelectedFile": boolean;
     "replaceSelectedText": boolean;
     "pasteReplacementBundleIds": string[] | null;
+
+    /**
+     * TTS Settings
+     */
+    "ttsEnabled": boolean;
+
+    /**
+     * "os" or "supertonic3"
+     */
+    "ttsEngine": string;
+
+    /**
+     * e.g., "http://localhost:7788"
+     */
+    "ttsEndpoint": string;
+
+    /**
+     * e.g., "default"
+     */
+    "ttsVoice": string;
+
+    /**
+     * Speak on AI response
+     */
+    "ttsUseAiResponse": boolean;
+
+    /**
+     * Speak on shortcut hotkey
+     */
+    "ttsUseShortcut": boolean;
+
+    /**
+     * Hotkey for TTS reading
+     */
+    "ttsShortcut": string;
 }

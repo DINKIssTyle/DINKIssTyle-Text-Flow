@@ -1,12 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"dkst-text-flow/internal/ai"
@@ -81,6 +88,9 @@ type App struct {
 	aiClient              *ai.Client
 	expansionSoundEvents  chan struct{}
 	expansionSoundStopper context.CancelFunc
+	ttsCmd                *exec.Cmd
+	ttsMu                 sync.Mutex
+	systray               *application.SystemTray
 }
 
 // NewApp creates a new App application struct
@@ -109,12 +119,17 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 
 	// Initialize the system tray
 	appInst := application.Get()
-	systray := appInst.SystemTray.New()
-	systray.SetTemplateIcon(menuIcon)
-	systray.SetTooltip("DKST Text Flow")
-	systray.OnClick(func() {
-		if mainWin, ok := appInst.Window.GetByName("main"); ok {
-			if mainWin.IsVisible() {
+	a.systray = appInst.SystemTray.New()
+	a.systray.SetTemplateIcon(menuIcon)
+	a.systray.SetTooltip("DKST Text Flow")
+	a.systray.OnClick(func() {
+		println("[DEBUG] Systray clicked!")
+		mainWin, ok := appInst.Window.GetByName("main")
+		println("[DEBUG] mainWin found:", ok)
+		if ok {
+			visible := mainWin.IsVisible()
+			println("[DEBUG] mainWin visible:", visible)
+			if visible {
 				mainWin.Hide()
 			} else {
 				mainWin.SetAlwaysOnTop(false)
@@ -124,6 +139,7 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 				mainWin.Center()
 				mainWin.Show()
 				mainWin.Focus()
+				appInst.Show()
 				appInst.Event.Emit("app:show-main")
 			}
 		}
@@ -562,14 +578,22 @@ func (a *App) configureAIHotkeyWithSettings(settings ai.Settings) {
 		_ = appInst.GlobalShortcut.UnregisterAll()
 	}
 
-	if !settings.Enabled {
-		return
+	if settings.Enabled && settings.Hotkey != "" {
+		err := appInst.GlobalShortcut.Register(settings.Hotkey, func() {
+			a.handleAIHotkey(platform.GetFrontmostPID())
+		})
+		if err != nil {
+			println("failed to register AI hotkey:", err.Error())
+		}
 	}
-	err := appInst.GlobalShortcut.Register(settings.Hotkey, func() {
-		a.handleAIHotkey(platform.GetFrontmostPID())
-	})
-	if err != nil {
-		println("failed to register AI hotkey:", err.Error())
+
+	if settings.TTSEnabled && settings.TTSUseShortcut && settings.TTSShortcut != "" {
+		err := appInst.GlobalShortcut.Register(settings.TTSShortcut, func() {
+			a.handleTTSHotkey(platform.GetFrontmostPID())
+		})
+		if err != nil {
+			println("failed to register TTS hotkey:", err.Error())
+		}
 	}
 }
 
@@ -621,7 +645,154 @@ func (a *App) normalizeAISettings(settings ai.Settings) ai.Settings {
 	} else {
 		normalized.Hotkey = ai.DefaultHotkey
 	}
+	if parsed, err := hotkey.Parse(normalized.TTSShortcut); err == nil {
+		normalized.TTSShortcut = parsed.Canonical
+	} else {
+		normalized.TTSShortcut = "Cmd+Shift+T"
+	}
 	return normalized
+}
+
+func (a *App) Speak(text string) error {
+	a.ttsMu.Lock()
+	defer a.ttsMu.Unlock()
+
+	// Stop any existing playback
+	if a.ttsCmd != nil && a.ttsCmd.Process != nil {
+		_ = a.ttsCmd.Process.Kill()
+		_ = a.ttsCmd.Wait()
+		a.ttsCmd = nil
+	}
+
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+
+	settings, err := a.GetAISettings()
+	if err != nil {
+		return err
+	}
+
+	if !settings.TTSEnabled {
+		return errors.New("TTS is disabled in settings")
+	}
+
+	switch settings.TTSEngine {
+	case "os":
+		a.ttsCmd = exec.Command("say", text)
+		err := a.ttsCmd.Start()
+		if err != nil {
+			return fmt.Errorf("failed to start say command: %w", err)
+		}
+		go func(cmd *exec.Cmd) {
+			_ = cmd.Wait()
+			a.ttsMu.Lock()
+			if a.ttsCmd == cmd {
+				a.ttsCmd = nil
+			}
+			a.ttsMu.Unlock()
+		}(a.ttsCmd)
+
+	case "supertonic3":
+		endpoint := strings.TrimRight(settings.TTSEndpoint, "/") + "/v1/audio/speech"
+		payload := map[string]interface{}{
+			"model": "supertonic",
+			"input": text,
+			"voice": settings.TTSVoice,
+		}
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("failed to marshal supertonic payload: %w", err)
+		}
+
+		req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(payloadBytes))
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to call supertonic endpoint: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("supertonic returned status %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+
+		tempFile, err := os.CreateTemp("", "dkst-tts-*.mp3")
+		if err != nil {
+			return fmt.Errorf("failed to create temp file: %w", err)
+		}
+		tempFilePath := tempFile.Name()
+		defer tempFile.Close()
+
+		_, err = io.Copy(tempFile, resp.Body)
+		if err != nil {
+			_ = os.Remove(tempFilePath)
+			return fmt.Errorf("failed to write audio to temp file: %w", err)
+		}
+
+		a.ttsCmd = exec.Command("afplay", tempFilePath)
+		err = a.ttsCmd.Start()
+		if err != nil {
+			_ = os.Remove(tempFilePath)
+			return fmt.Errorf("failed to start afplay command: %w", err)
+		}
+
+		go func(cmd *exec.Cmd, filePath string) {
+			_ = cmd.Wait()
+			_ = os.Remove(filePath)
+			a.ttsMu.Lock()
+			if a.ttsCmd == cmd {
+				a.ttsCmd = nil
+			}
+			a.ttsMu.Unlock()
+		}(a.ttsCmd, tempFilePath)
+
+	default:
+		return fmt.Errorf("unknown TTS engine: %s", settings.TTSEngine)
+	}
+
+	return nil
+}
+
+func (a *App) StopSpeaking() {
+	a.ttsMu.Lock()
+	defer a.ttsMu.Unlock()
+
+	if a.ttsCmd != nil && a.ttsCmd.Process != nil {
+		_ = a.ttsCmd.Process.Kill()
+		_ = a.ttsCmd.Wait()
+		a.ttsCmd = nil
+	}
+}
+
+func (a *App) handleTTSHotkey(sourceProcessID int) {
+	settings, err := a.GetAISettings()
+	if err != nil || !settings.TTSEnabled || !settings.TTSUseShortcut {
+		return
+	}
+
+	a.ttsMu.Lock()
+	isSpeaking := a.ttsCmd != nil
+	a.ttsMu.Unlock()
+
+	if isSpeaking {
+		a.StopSpeaking()
+		return
+	}
+
+	selected, err := platform.SelectedTextFromProcess(sourceProcessID)
+	if err != nil || strings.TrimSpace(selected) == "" {
+		return
+	}
+
+	_ = a.Speak(selected)
 }
 
 func (a *App) saveAIPromptSettings(settings AIPromptSettings) (AIPromptSettings, error) {

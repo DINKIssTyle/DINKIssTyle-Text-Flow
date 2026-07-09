@@ -29,6 +29,15 @@ type Settings struct {
 	UseSelectedFile           bool     `json:"useSelectedFile"`
 	ReplaceSelectedText       bool     `json:"replaceSelectedText"`
 	PasteReplacementBundleIDs []string `json:"pasteReplacementBundleIds"`
+
+	// TTS Settings
+	TTSEnabled       bool   `json:"ttsEnabled"`
+	TTSEngine        string `json:"ttsEngine"`        // "os" or "supertonic3"
+	TTSEndpoint      string `json:"ttsEndpoint"`      // e.g., "http://localhost:7788"
+	TTSVoice         string `json:"ttsVoice"`         // e.g., "default"
+	TTSUseAIResponse bool   `json:"ttsUseAiResponse"` // Speak on AI response
+	TTSUseShortcut   bool   `json:"ttsUseShortcut"`   // Speak on shortcut hotkey
+	TTSShortcut      string `json:"ttsShortcut"`      // Hotkey for TTS reading
 }
 
 type ContextKind string
@@ -79,6 +88,15 @@ func DefaultSettings() Settings {
 			[]string{},
 			DefaultPasteReplacementBundleIDs...,
 		),
+
+		// TTS Defaults
+		TTSEnabled:       false,
+		TTSEngine:        "os",
+		TTSEndpoint:      "http://localhost:7788",
+		TTSVoice:         "default",
+		TTSUseAIResponse: false,
+		TTSUseShortcut:   false,
+		TTSShortcut:      "Cmd+Shift+T",
 	}
 }
 
@@ -129,6 +147,29 @@ func NormalizeSettings(settings Settings) Settings {
 			bundleIDs = append(bundleIDs, bundleID)
 		}
 		settings.PasteReplacementBundleIDs = bundleIDs
+	}
+
+	settings.TTSEngine = strings.TrimSpace(settings.TTSEngine)
+	if settings.TTSEngine == "" {
+		settings.TTSEngine = "os"
+	}
+	if settings.TTSEngine != "os" && settings.TTSEngine != "supertonic3" {
+		settings.TTSEngine = "os"
+	}
+
+	settings.TTSEndpoint = strings.TrimSpace(settings.TTSEndpoint)
+	if settings.TTSEndpoint == "" {
+		settings.TTSEndpoint = "http://localhost:7788"
+	}
+
+	settings.TTSVoice = strings.TrimSpace(settings.TTSVoice)
+	if settings.TTSVoice == "" {
+		settings.TTSVoice = "default"
+	}
+
+	settings.TTSShortcut = strings.TrimSpace(settings.TTSShortcut)
+	if settings.TTSShortcut == "" {
+		settings.TTSShortcut = "Cmd+Shift+T"
 	}
 
 	return settings

@@ -8,8 +8,6 @@
 		<string>Text expansion utility by DINKI&#39;ssTyle.</string>
 		<key>CFBundleIconFile</key>
 		<string>icons</string>
-		<key>CFBundleIconName</key>
-		<string>appicon</string>
 		<key>CFBundleIdentifier</key>
 		<string>com.dinkisstyle.textflow</string>
 		<key>CFBundleName</key>

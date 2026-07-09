@@ -31,6 +31,8 @@ import {
     SaveAISettings,
     SaveCommonAIPromptRule,
     SaveGeneralSettings,
+    Speak,
+    StopSpeaking,
     SetLabelSnippetsEnabled,
     ToggleSnippet,
     UpdateAIPromptProfile,
@@ -321,6 +323,8 @@ function App() {
     const [aiRunning, setAIRunning] = useState(false);
     const [aiElapsedMs, setAIElapsedMs] = useState(0);
     const [recordingHotkey, setRecordingHotkey] = useState(false);
+    const [recordingTtsHotkey, setRecordingTtsHotkey] = useState(false);
+    const [hasBeenInvoked, setHasBeenInvoked] = useState(false);
     const [aiContext, setAIContext] = useState<AIInvocationContext>({
         kind: 'none',
         text: '',
@@ -494,6 +498,7 @@ function App() {
         }
         const cancel = Events.On('ai:invoke', (event) => {
             const context = event.data as AIInvocationContext;
+            setHasBeenInvoked(true);
             setWindowMode('hud');
             setActiveView('ai');
             setAIContext({
@@ -768,13 +773,17 @@ function App() {
     }
 
     async function hideCurrentWindow(cancelRunning = true) {
-        if (cancelRunning && aiRunning) {
-            try {
-                await CancelAIRequest();
-            } catch (err) {
-                setError(String(err));
-            } finally {
-                setAIRunning(false);
+        setHasBeenInvoked(false);
+        if (cancelRunning) {
+            StopSpeaking().catch(() => {});
+            if (aiRunning) {
+                try {
+                    await CancelAIRequest();
+                } catch (err) {
+                    setError(String(err));
+                } finally {
+                    setAIRunning(false);
+                }
             }
         }
         Window.Hide();
@@ -879,7 +888,14 @@ function App() {
             pasteReplacementBundleIds: Array.isArray(settings?.pasteReplacementBundleIds)
                 ? settings.pasteReplacementBundleIds.filter((bundleId: unknown) => typeof bundleId === 'string')
                 : ['com.apple.iWork.Keynote', 'com.apple.iWork.Pages', 'com.apple.iWork.Numbers'],
-        };
+            ttsEnabled: !!settings?.ttsEnabled,
+            ttsEngine: settings?.ttsEngine || 'os',
+            ttsEndpoint: settings?.ttsEndpoint || 'http://localhost:7788',
+            ttsVoice: settings?.ttsVoice || 'default',
+            ttsUseAiResponse: !!settings?.ttsUseAiResponse,
+            ttsUseShortcut: !!settings?.ttsUseShortcut,
+            ttsShortcut: settings?.ttsShortcut || 'Cmd+Shift+T',
+        } as any;
     }
 
     function parseBundleIdList(value: string) {
@@ -1082,7 +1098,7 @@ function App() {
     }
 
     function resizeAIHUD() {
-        if (windowMode !== 'hud') {
+        if (windowMode !== 'hud' || !hasBeenInvoked) {
             return;
         }
         window.requestAnimationFrame(() => {
@@ -1128,6 +1144,8 @@ function App() {
         setAIResult('');
         setAIReplacement('');
         try {
+            StopSpeaking().catch(() => {});
+
             const result = await RunAIAssist({
                 instruction: aiPrompt,
                 contextKind: (aiContext.kind || 'none') as any,
@@ -1161,6 +1179,15 @@ function App() {
             setAIResult(isEdit ? '' : (result.supportReport || ''));
             setAIReplacement(isEdit ? result.replacement : '');
             playCompletionSound();
+
+            // Speak if enabled
+            // @ts-ignore
+            if (aiSettings?.ttsEnabled && aiSettings?.ttsUseAiResponse) {
+                const textToSpeak = isEdit ? result.replacement : (result.supportReport || '');
+                if (textToSpeak) {
+                    Speak(textToSpeak).catch(() => {});
+                }
+            }
         } catch (err) {
             setError(String(err));
         } finally {
@@ -1203,6 +1230,30 @@ function App() {
         }
         setAISettings({ ...aiSettings, hotkey: nextHotkey });
         setRecordingHotkey(false);
+    }
+
+    function captureTtsHotkey(event: KeyboardEvent<HTMLButtonElement>) {
+        if (!recordingTtsHotkey || !aiSettings) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (event.key === 'Escape') {
+            setRecordingTtsHotkey(false);
+            return;
+        }
+
+        const nextHotkey = formatCapturedHotkey(event);
+        if (!nextHotkey) {
+            return;
+        }
+        setAISettings({
+            ...aiSettings,
+            // @ts-ignore
+            ttsShortcut: nextHotkey,
+        });
+        setRecordingTtsHotkey(false);
     }
 
     return (
@@ -1877,6 +1928,100 @@ function App() {
                                         </div>
                                         <span className="field-hint">{t('pasteReplacementBundleIdsHint')}</span>
                                     </label>
+
+                                    <hr className="settings-divider" />
+
+                                    <div className="settings-section-header">
+                                        <h3>{t('ttsSettings')}</h3>
+                                        <p>{t('ttsSettingsDescription')}</p>
+                                    </div>
+
+                                    <div className="check-row">
+                                        <label>
+                                            <input
+                                                type="checkbox"
+                                                // @ts-ignore
+                                                checked={!!aiSettings.ttsEnabled}
+                                                // @ts-ignore
+                                                onChange={(event) => setAISettings({ ...aiSettings, ttsEnabled: event.target.checked })}
+                                            /> {t('enableTts')}
+                                        </label>
+                                        <label>
+                                            <input
+                                                type="checkbox"
+                                                // @ts-ignore
+                                                checked={!!aiSettings.ttsUseAiResponse}
+                                                // @ts-ignore
+                                                onChange={(event) => setAISettings({ ...aiSettings, ttsUseAiResponse: event.target.checked })}
+                                            /> {t('ttsUseAiResponse')}
+                                        </label>
+                                        <label>
+                                            <input
+                                                type="checkbox"
+                                                // @ts-ignore
+                                                checked={!!aiSettings.ttsUseShortcut}
+                                                // @ts-ignore
+                                                onChange={(event) => setAISettings({ ...aiSettings, ttsUseShortcut: event.target.checked })}
+                                            /> {t('ttsUseShortcut')}
+                                        </label>
+                                    </div>
+
+                                    <div className="settings-form-grid">
+                                        <label>
+                                            {t('ttsEngine')}
+                                            <select
+                                                // @ts-ignore
+                                                value={aiSettings.ttsEngine || 'os'}
+                                                // @ts-ignore
+                                                onChange={(event) => setAISettings({ ...aiSettings, ttsEngine: event.target.value })}
+                                            >
+                                                <option value="os">{t('osTts')}</option>
+                                                <option value="supertonic3">{t('supertonic3')}</option>
+                                            </select>
+                                        </label>
+                                        <label>
+                                            {t('ttsShortcut')}
+                                            <button
+                                                className={`hotkey-capture ${recordingTtsHotkey ? 'recording' : ''}`}
+                                                type="button"
+                                                onClick={(event) => {
+                                                    setRecordingTtsHotkey(true);
+                                                    event.currentTarget.focus();
+                                                }}
+                                                onBlur={() => setRecordingTtsHotkey(false)}
+                                                onKeyDown={captureTtsHotkey}
+                                            >
+                                                {/* @ts-ignore */}
+                                                {recordingTtsHotkey ? t('pressShortcut') : (aiSettings.ttsShortcut || t('recordShortcut'))}
+                                            </button>
+                                        </label>
+                                    </div>
+
+                                    {/* @ts-ignore */}
+                                    {aiSettings.ttsEngine === 'supertonic3' && (
+                                        <div className="settings-form-grid">
+                                            <label>
+                                                {t('supertonicEndpoint')}
+                                                <input
+                                                    // @ts-ignore
+                                                    value={aiSettings.ttsEndpoint || 'http://localhost:7788'}
+                                                    // @ts-ignore
+                                                    onChange={(event) => setAISettings({ ...aiSettings, ttsEndpoint: event.target.value })}
+                                                    placeholder="http://localhost:7788"
+                                                />
+                                            </label>
+                                            <label>
+                                                {t('supertonicVoice')}
+                                                <input
+                                                    // @ts-ignore
+                                                    value={aiSettings.ttsVoice || 'default'}
+                                                    // @ts-ignore
+                                                    onChange={(event) => setAISettings({ ...aiSettings, ttsVoice: event.target.value })}
+                                                    placeholder="default"
+                                                />
+                                            </label>
+                                        </div>
+                                    )}
                                 </form>
                             </>
                         )}
