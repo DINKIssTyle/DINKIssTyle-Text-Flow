@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -13,11 +14,13 @@ import (
 	"dkst-text-flow/internal/hotkey"
 	"dkst-text-flow/internal/loginitem"
 	"dkst-text-flow/internal/platform"
-	"dkst-text-flow/internal/statusitem"
 	"dkst-text-flow/internal/storage"
 
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+//go:embed build/menu_icon.pdf
+var menuIcon []byte
 
 const (
 	aiSettingsKey       = "ai.settings"
@@ -90,29 +93,50 @@ func NewApp() *App {
 
 // startup is called when the app starts. The context is saved
 // so we can call the runtime methods
-func (a *App) startup(ctx context.Context) {
+func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	a.ctx = ctx
 
 	store, err := storage.OpenDefault()
 	if err != nil {
 		println("failed to open storage:", err.Error())
-		return
+		return err
 	}
 	a.store = store
 	a.startExpansionSoundDispatcher(ctx)
 	a.configureExpansionSoundEvent()
 	flowengine.Start(a.store)
 	a.configureAIHotkey()
+
+	// Initialize the system tray
+	appInst := application.Get()
+	systray := appInst.SystemTray.New()
+	systray.SetTemplateIcon(menuIcon)
+	systray.SetTooltip("DKST Text Flow")
+	systray.OnClick(func() {
+		if mainWin, ok := appInst.Window.GetByName("main"); ok {
+			if mainWin.IsVisible() {
+				mainWin.Hide()
+			} else {
+				mainWin.SetAlwaysOnTop(false)
+				mainWin.UnMinimise()
+				mainWin.SetMinSize(900, 560)
+				mainWin.SetSize(900, 560)
+				mainWin.Center()
+				mainWin.Show()
+				mainWin.Focus()
+				appInst.Event.Emit("app:show-main")
+			}
+		}
+	})
+
+	return nil
 }
 
-func (a *App) domReady(ctx context.Context) {
-	statusitem.Install(ctx)
-	a.configureExpansionSoundEvent()
-	a.configureAIHotkey()
-}
-
-func (a *App) shutdown(ctx context.Context) {
-	hotkey.Unregister()
+func (a *App) ServiceShutdown() error {
+	appInst := application.Get()
+	if appInst.GlobalShortcut != nil {
+		_ = appInst.GlobalShortcut.UnregisterAll()
+	}
 	flowengine.SetExpansionHandler(nil)
 	if a.expansionSoundStopper != nil {
 		a.expansionSoundStopper()
@@ -120,11 +144,12 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 	flowengine.Stop()
 	if a.store == nil {
-		return
+		return nil
 	}
 	if err := a.store.Close(); err != nil {
 		println("failed to close storage:", err.Error())
 	}
+	return nil
 }
 
 func (a *App) ListSnippets(query string) ([]storage.Snippet, error) {
@@ -153,18 +178,27 @@ func (a *App) ConfirmSnippetDeletion(title string) (bool, error) {
 		title = "Untitled snippet"
 	}
 
-	response, err := wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
-		Type:          wailsruntime.QuestionDialog,
-		Title:         "Delete Snippet",
-		Message:       fmt.Sprintf("Delete snippet \"%s\"?\nThis action cannot be undone.", title),
-		Buttons:       []string{"Delete", "Cancel"},
-		DefaultButton: "Cancel",
-		CancelButton:  "Cancel",
+	resultChan := make(chan bool, 1)
+	appInst := application.Get()
+	dialog := appInst.Dialog.Question().
+		SetTitle("Delete Snippet").
+		SetMessage(fmt.Sprintf("Delete snippet \"%s\"?\nThis action cannot be undone.", title))
+
+	deleteBtn := dialog.AddButton("Delete")
+	deleteBtn.OnClick(func() {
+		resultChan <- true
 	})
-	if err != nil {
-		return false, err
-	}
-	return response == "Delete", nil
+
+	cancelBtn := dialog.AddButton("Cancel")
+	cancelBtn.OnClick(func() {
+		resultChan <- false
+	})
+
+	dialog.SetDefaultButton(cancelBtn)
+	dialog.SetCancelButton(cancelBtn)
+	dialog.Show()
+
+	return <-resultChan, nil
 }
 
 func (a *App) ToggleSnippet(id int64, enabled bool) (storage.Snippet, error) {
@@ -193,18 +227,27 @@ func (a *App) ConfirmLabelDeletion(name string) (bool, error) {
 		name = "Untitled label"
 	}
 
-	response, err := wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
-		Type:          wailsruntime.QuestionDialog,
-		Title:         "Delete Label",
-		Message:       fmt.Sprintf("Delete label \"%s\"?\nSnippets in this label will move back to All.", name),
-		Buttons:       []string{"Delete", "Cancel"},
-		DefaultButton: "Cancel",
-		CancelButton:  "Cancel",
+	resultChan := make(chan bool, 1)
+	appInst := application.Get()
+	dialog := appInst.Dialog.Question().
+		SetTitle("Delete Label").
+		SetMessage(fmt.Sprintf("Delete label \"%s\"?\nSnippets in this label will move back to All.", name))
+
+	deleteBtn := dialog.AddButton("Delete")
+	deleteBtn.OnClick(func() {
+		resultChan <- true
 	})
-	if err != nil {
-		return false, err
-	}
-	return response == "Delete", nil
+
+	cancelBtn := dialog.AddButton("Cancel")
+	cancelBtn.OnClick(func() {
+		resultChan <- false
+	})
+
+	dialog.SetDefaultButton(cancelBtn)
+	dialog.SetCancelButton(cancelBtn)
+	dialog.Show()
+
+	return <-resultChan, nil
 }
 
 func (a *App) AssignSnippetLabel(snippetID int64, labelID int64) (storage.Snippet, error) {
@@ -362,14 +405,11 @@ func (a *App) DeleteAIPromptProfile(id string) (AIPromptSettings, error) {
 }
 
 func (a *App) BrowseAIPromptApp() (platform.AppInfo, error) {
-	if a.ctx == nil {
-		return platform.AppInfo{}, errors.New("application context is not ready")
-	}
-	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title:                      "Choose an application",
-		DefaultDirectory:           "/Applications",
-		TreatPackagesAsDirectories: false,
-	})
+	appInst := application.Get()
+	path, err := appInst.Dialog.OpenFile().
+		SetTitle("Choose an application").
+		SetDirectory("/Applications").
+		PromptForSingleSelection()
 	if err != nil {
 		return platform.AppInfo{}, err
 	}
@@ -489,9 +529,7 @@ func (a *App) startExpansionSoundDispatcher(ctx context.Context) {
 			case <-dispatchCtx.Done():
 				return
 			case <-a.expansionSoundEvents:
-				if a.ctx != nil {
-					wailsruntime.EventsEmit(a.ctx, "snippet:expanded")
-				}
+				application.Get().Event.Emit("snippet:expanded")
 			}
 		}
 	}()
@@ -519,20 +557,23 @@ func (a *App) configureAIHotkey() {
 }
 
 func (a *App) configureAIHotkeyWithSettings(settings ai.Settings) {
+	appInst := application.Get()
+	if appInst.GlobalShortcut != nil {
+		_ = appInst.GlobalShortcut.UnregisterAll()
+	}
+
 	if !settings.Enabled {
-		hotkey.Unregister()
 		return
 	}
-	if err := hotkey.Register(settings.Hotkey, a.handleAIHotkey); err != nil {
+	err := appInst.GlobalShortcut.Register(settings.Hotkey, func() {
+		a.handleAIHotkey(platform.GetFrontmostPID())
+	})
+	if err != nil {
 		println("failed to register AI hotkey:", err.Error())
 	}
 }
 
 func (a *App) handleAIHotkey(sourceProcessID int) {
-	if a.ctx == nil {
-		return
-	}
-
 	settings, err := a.GetAISettings()
 	if err != nil || !settings.Enabled {
 		return
@@ -558,13 +599,19 @@ func (a *App) handleAIHotkey(sourceProcessID int) {
 		return
 	}
 
-	wailsruntime.WindowSetMinSize(a.ctx, 460, 152)
-	wailsruntime.WindowSetSize(a.ctx, 460, 152)
-	wailsruntime.WindowCenter(a.ctx)
-	wailsruntime.WindowSetAlwaysOnTop(a.ctx, true)
-	wailsruntime.WindowUnminimise(a.ctx)
-	wailsruntime.WindowShow(a.ctx)
-	wailsruntime.EventsEmit(a.ctx, "ai:invoke", invocation)
+	appInst := application.Get()
+	if aiWin, ok := appInst.Window.GetByName("ai"); ok {
+		application.InvokeSync(func() {
+			aiWin.SetMinSize(460, 152)
+			aiWin.SetSize(460, 152)
+			aiWin.Center()
+			aiWin.SetAlwaysOnTop(true)
+			aiWin.UnMinimise()
+			aiWin.Show()
+			aiWin.Focus()
+		})
+		appInst.Event.Emit("ai:invoke", invocation)
+	}
 }
 
 func (a *App) normalizeAISettings(settings ai.Settings) ai.Settings {

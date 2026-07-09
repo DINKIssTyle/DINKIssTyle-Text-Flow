@@ -80,6 +80,10 @@ html[data-theme="dark"] {
     }
 }
 
+html, body {
+    background: transparent !important;
+}
+
 #root {
     height: 100vh;
     overflow: hidden;
@@ -106,6 +110,11 @@ html[data-theme="dark"] {
     display: block;
     min-height: 100vh;
     background: var(--app-bg-translucent);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 10px 30px var(--modal-shadow);
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
 .sidebar {

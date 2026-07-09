@@ -48,3 +48,7 @@ func AppInfoFromProcess(processID int) AppInfo {
 func AppInfoFromBundlePath(path string) AppInfo {
 	return appInfoFromBundlePath(path)
 }
+
+func GetFrontmostPID() int {
+	return getFrontmostPID()
+}

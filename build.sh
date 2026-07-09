@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_NAME="DKST Text Flow"
-APP_PATH="$ROOT_DIR/build/bin/$APP_NAME.app"
+APP_PATH="$ROOT_DIR/bin/$APP_NAME.app"
 DEFAULT_IDENTITY="Apple Development: dinki@me.com (48Z2CKZS59)"
 
 usage() {
@@ -59,20 +59,19 @@ done
 
 cd "$ROOT_DIR"
 
-if ! security find-identity -v -p codesigning | grep -Fq "\"$IDENTITY\""; then
+if [[ "$IDENTITY" == "-" ]]; then
+  echo "Using ad-hoc codesigning (-)."
+elif ! security find-identity -v -p codesigning | grep -Fq "\"$IDENTITY\""; then
   echo "Codesign identity not found: $IDENTITY" >&2
   echo "Available identities:" >&2
   security find-identity -v -p codesigning >&2 || true
-  exit 1
+  echo "Falling back to ad-hoc codesigning (-)." >&2
+  IDENTITY="-"
 fi
+
+$(go env GOPATH)/bin/wails3 package
 
 go test ./...
-
-if [[ "$SKIP_BINDINGS" -eq 1 ]]; then
-  wails build -clean -skipbindings
-else
-  wails build -clean
-fi
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "Build output not found: $APP_PATH" >&2

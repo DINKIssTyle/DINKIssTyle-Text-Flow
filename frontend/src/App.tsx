@@ -36,120 +36,13 @@ import {
     UpdateAIPromptProfile,
     UpdateLabel,
     UpdateSnippet,
-} from "../wailsjs/go/main/App";
-import { EventsOn, Quit, WindowCenter, WindowHide, WindowSetSize } from "../wailsjs/runtime/runtime";
+} from "../bindings/dkst-text-flow/app";
+import { Application, Events, Window } from "@wailsio/runtime";
 
-type Snippet = {
-    id: number;
-    labelId: number;
-    shortcut: string;
-    title: string;
-    content: string;
-    contentType: string;
-    enabled: boolean;
-    caseSensitive: boolean;
-    usePaste: boolean;
-    expandMode: string;
-    usageCount: number;
-    createdAt: string;
-    updatedAt: string;
-};
-
-type SnippetInput = {
-    labelId: number;
-    shortcut: string;
-    title: string;
-    content: string;
-    contentType: string;
-    enabled: boolean;
-    caseSensitive: boolean;
-    usePaste: boolean;
-    expandMode: string;
-};
-
-type Label = {
-    id: number;
-    name: string;
-    description: string;
-    color: string;
-    snippetCount: number;
-    enabledCount: number;
-    createdAt: string;
-    updatedAt: string;
-};
-
-type LabelInput = {
-    name: string;
-    description: string;
-    color: string;
-};
-
-type DashboardStats = {
-    totalExpansions: number;
-    todayExpansions: number;
-    snippetCount: number;
-    enabledCount: number;
-    todayTypingCount: number;
-    averageDailyTyping: number;
-    typingHistory: DailyTypingStat[];
-    topSnippets: Snippet[];
-};
-
-type DailyTypingStat = {
-    date: string;
-    count: number;
-};
-
-type PlatformStatus = {
-    accessibilityTrusted: boolean;
-    secureInputActive: boolean;
-    activeAppName: string;
-    activeBundleId: string;
-    flowEngineRunning: boolean;
-    message: string;
-};
-
-type AISettings = {
-    enabled: boolean;
-    provider: string;
-    endpoint: string;
-    model: string;
-    apiKey: string;
-    temperature: number;
-    hotkey: string;
-    useSelectedText: boolean;
-    useSelectedFile: boolean;
-    replaceSelectedText: boolean;
-    pasteReplacementBundleIds: string[];
-};
-
-type GeneralSettings = {
-    themeMode: 'auto' | 'light' | 'dark';
-    language: Language;
-    typingTrendEnabled: boolean;
-    startAtLogin: boolean;
-    soundName: string;
-};
-
-type AIPromptRule = {
-    useSelectedText: boolean;
-    runWithoutSelection: boolean;
-    selectedTextPrompt: string;
-    noSelectionPrompt: string;
-};
-
-type AIPromptProfile = AIPromptRule & {
-    id: string;
-    appName: string;
-    appBundleId: string;
-    createdAt: string;
-    updatedAt: string;
-};
-
-type AIPromptSettings = {
-    common: AIPromptRule;
-    profiles: AIPromptProfile[];
-};
+import { Snippet, SnippetInput, Label, LabelInput, DashboardStats, DailyTypingStat } from "../bindings/dkst-text-flow/internal/storage/models";
+import { Status as PlatformStatus } from "../bindings/dkst-text-flow/internal/platform/models";
+import { Settings as AISettings } from "../bindings/dkst-text-flow/internal/ai/models";
+import { GeneralSettings, AIPromptRule, AIPromptProfile, AIPromptProfileInput, AIPromptSettings } from "../bindings/dkst-text-flow/models";
 
 type AIInvocationContext = {
     kind: string;
@@ -384,8 +277,9 @@ const aboutMarkdownComponents = {
 };
 
 function App() {
-    const [activeView, setActiveView] = useState<'snippets' | 'dashboard' | 'aiPrompts' | 'ai' | 'settings' | 'about'>('snippets');
-    const [windowMode, setWindowMode] = useState<'main' | 'hud'>('main');
+    const isHUD = useMemo(() => new URLSearchParams(window.location.search).get('mode') === 'hud', []);
+    const [activeView, setActiveView] = useState<'snippets' | 'dashboard' | 'aiPrompts' | 'ai' | 'settings' | 'about'>(isHUD ? 'ai' : 'snippets');
+    const [windowMode, setWindowMode] = useState<'main' | 'hud'>(isHUD ? 'hud' : 'main');
     const [snippets, setSnippets] = useState<Snippet[]>([]);
     const [labels, setLabels] = useState<Label[]>([]);
     const [stats, setStats] = useState<DashboardStats>({
@@ -450,7 +344,7 @@ function App() {
         return labels.find((label) => label.id === selectedLabelID) ?? null;
     }, [labels, selectedLabelID]);
 
-    const language = generalSettings?.language ?? 'en';
+    const language = (generalSettings?.language ?? 'en') as Language;
     const t = useMemo(() => createTranslator(language), [language]);
 
     useEffect(() => {
@@ -484,17 +378,22 @@ function App() {
             GetDashboard(),
             GetPlatformStatus(),
         ]);
-        setLabels(nextLabels);
-        setSnippets(nextSnippets);
-        setStats(nextStats);
+        setLabels(nextLabels || []);
+        const snippetsList = nextSnippets || [];
+        setSnippets(snippetsList);
+        setStats({
+            ...nextStats,
+            typingHistory: nextStats.typingHistory || [],
+            topSnippets: nextStats.topSnippets || [],
+        });
         setPlatformStatus(nextStatus);
-        if (nextSnippets.length > 0 && !nextSnippets.some((snippet) => snippet.id === selectedID)) {
-            setSelectedID(nextSnippets[0].id);
+        if (snippetsList.length > 0 && !snippetsList.some((snippet) => snippet.id === selectedID)) {
+            setSelectedID(snippetsList[0].id);
             if (detailMode === 'snippet') {
                 setDetailMode('snippet');
             }
         }
-        if (nextSnippets.length === 0 && detailMode === 'snippet') {
+        if (snippetsList.length === 0 && detailMode === 'snippet') {
             setSelectedID(null);
             setDetailMode(labelID > 0 ? 'label' : 'all');
         }
@@ -560,7 +459,13 @@ function App() {
 
     useEffect(() => {
         const timer = window.setInterval(() => {
-            GetDashboard().then(setStats).catch((err) => setError(String(err)));
+            GetDashboard().then((nextStats) => {
+                setStats({
+                    ...nextStats,
+                    typingHistory: nextStats.typingHistory || [],
+                    topSnippets: nextStats.topSnippets || [],
+                });
+            }).catch((err) => setError(String(err)));
         }, 2500);
         return () => window.clearInterval(timer);
     }, []);
@@ -584,7 +489,11 @@ function App() {
     }, [aiRunning, windowMode]);
 
     useEffect(() => {
-        const cancel = EventsOn('ai:invoke', (context: AIInvocationContext) => {
+        if (!isHUD) {
+            return;
+        }
+        const cancel = Events.On('ai:invoke', (event) => {
+            const context = event.data as AIInvocationContext;
             setWindowMode('hud');
             setActiveView('ai');
             setAIContext({
@@ -608,7 +517,10 @@ function App() {
     }, []);
 
     useEffect(() => {
-        const cancel = EventsOn('snippet:expanded', () => {
+        if (isHUD) {
+            return;
+        }
+        const cancel = Events.On('snippet:expanded', () => {
             playCompletionSound();
         });
         return cancel;
@@ -638,7 +550,10 @@ function App() {
     }, [aiRunning]);
 
     useEffect(() => {
-        const cancel = EventsOn('app:show-main', () => {
+        if (isHUD) {
+            return;
+        }
+        const cancel = Events.On('app:show-main', () => {
             setWindowMode('main');
             setActiveView('snippets');
             setAIResult('');
@@ -862,8 +777,7 @@ function App() {
                 setAIRunning(false);
             }
         }
-        setWindowMode('main');
-        WindowHide();
+        Window.Hide();
     }
 
     function normalizeGeneralSettings(settings: { themeMode?: string; language?: string; typingTrendEnabled?: boolean; startAtLogin?: boolean; soundName?: string } = {}): GeneralSettings {
@@ -1039,7 +953,7 @@ function App() {
             });
             const normalized = normalizeAIPromptSettings(saved);
             setAIPromptSettings(normalized);
-            setSelectedPromptID(normalized.profiles[normalized.profiles.length - 1]?.id || 'common');
+            setSelectedPromptID((normalized.profiles || [])[(normalized.profiles || []).length - 1]?.id || 'common');
         } catch (err) {
             setError(String(err));
         } finally {
@@ -1110,7 +1024,7 @@ function App() {
             setAISettings({
                 ...aiSettings,
                 pasteReplacementBundleIds: parseBundleIdList([
-                    ...aiSettings.pasteReplacementBundleIds,
+                    ...(aiSettings.pasteReplacementBundleIds || []),
                     appInfo.bundleId,
                 ].join('\n')),
             });
@@ -1135,7 +1049,7 @@ function App() {
         }
         setAIPromptSettings({
             ...aiPromptSettings,
-            profiles: aiPromptSettings.profiles.map((profile) => (
+            profiles: (aiPromptSettings.profiles || []).map((profile) => (
                 profile.id === profileID ? { ...profile, ...patch } : profile
             )),
         });
@@ -1181,8 +1095,8 @@ function App() {
                 ? Math.min(document.querySelector<HTMLElement>('.hud-result')?.scrollHeight ?? 0, 150)
                 : 0;
             const nextHeight = Math.max(152, Math.min(360, 118 + promptHeight + statusHeight + resultHeight + (hasResult ? 18 : 0)));
-            WindowSetSize(460, nextHeight);
-            WindowCenter();
+            Window.SetSize(460, nextHeight);
+            Window.Center();
         });
     }
 
@@ -1216,7 +1130,7 @@ function App() {
         try {
             const result = await RunAIAssist({
                 instruction: aiPrompt,
-                contextKind: aiContext.kind || 'none',
+                contextKind: (aiContext.kind || 'none') as any,
                 contextText: aiContext.text || '',
                 filePath: '',
                 appName: aiContext.appName || '',
@@ -1324,7 +1238,7 @@ function App() {
                         <span className="material-symbols-rounded" aria-hidden="true">info</span>
                         <span>{t('about')}</span>
                     </button>
-                    <button className="quit-button" type="button" onClick={() => Quit()}>
+                    <button className="quit-button" type="button" onClick={() => Application.Quit()}>
                         <span className="material-symbols-rounded" aria-hidden="true">power_settings_new</span>
                         <span>{t('quit')}</span>
                     </button>
@@ -1562,12 +1476,12 @@ function App() {
                                 <strong>{formatCount(stats.averageDailyTyping)}</strong>
                             </article>
                         </div>
-                        <TypingChart history={stats.typingHistory} enabled={generalSettings?.typingTrendEnabled !== false} t={t} />
+                        <TypingChart history={stats.typingHistory || []} enabled={generalSettings?.typingTrendEnabled !== false} t={t} />
                         <div className="top-list">
                             <h2>{t('topSnippets')}</h2>
-                            {stats.topSnippets.length === 0 ? (
+                            {(stats.topSnippets || []).length === 0 ? (
                                 <p>{t('noExpansionsYet')}</p>
-                            ) : stats.topSnippets.map((snippet) => (
+                            ) : (stats.topSnippets || []).map((snippet) => (
                                 <div key={snippet.id} className="top-row">
                                     <span className="shortcut">{snippet.shortcut}</span>
                                     <span className="top-title">{snippet.title}</span>
@@ -1597,7 +1511,7 @@ function App() {
                                     <span className="snippet-title">{t('defaultBehavior')}</span>
                                     <span className="state enabled">{t('base')}</span>
                                 </button>
-                                {aiPromptSettings?.profiles.map((profile) => (
+                                {(aiPromptSettings?.profiles || []).map((profile) => (
                                     <button
                                         key={profile.id}
                                         className={`snippet-row prompt-row ${selectedPromptID === profile.id ? 'selected' : ''}`}
@@ -1628,7 +1542,7 @@ function App() {
                                 )
                             ) : (
                                 (() => {
-                                    const profile = aiPromptSettings?.profiles.find((item) => item.id === selectedPromptID);
+                                    const profile = (aiPromptSettings?.profiles || []).find((item) => item.id === selectedPromptID);
                                     if (!profile) {
                                         return <div className="empty-state">{t('chooseAIPromptProfile')}</div>;
                                     }
@@ -1951,7 +1865,7 @@ function App() {
                                         {t('pasteReplacementBundleIds')}
                                         <div className="bundle-list-control">
                                             <textarea
-                                                value={formatBundleIdList(aiSettings.pasteReplacementBundleIds)}
+                                                value={formatBundleIdList(aiSettings.pasteReplacementBundleIds || [])}
                                                 onChange={(event) => setAISettings({
                                                     ...aiSettings,
                                                     pasteReplacementBundleIds: parseBundleIdList(event.target.value),

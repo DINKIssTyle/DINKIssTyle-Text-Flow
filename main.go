@@ -2,11 +2,10 @@ package main
 
 import (
 	"embed"
+	"log"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/mac"
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 //go:embed all:frontend/dist
@@ -17,34 +16,70 @@ func main() {
 	app := NewApp()
 
 	// Create application with options
-	err := wails.Run(&options.App{
-		Title:             "DKST Text Flow",
-		Width:             900,
-		Height:            560,
-		MinWidth:          900,
-		MinHeight:         560,
-		StartHidden:       true,
-		HideWindowOnClose: true,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
+	appInst := application.New(application.Options{
+		Name:        "DKST Text Flow",
+		Description: "Text expansion utility by DINKI'ssTyle.",
+		Services: []application.Service{
+			application.NewService(app),
 		},
-		BackgroundColour: &options.RGBA{R: 246, G: 248, B: 251, A: 1},
-		OnStartup:        app.startup,
-		OnDomReady:       app.domReady,
-		OnShutdown:       app.shutdown,
-		Mac: &mac.Options{
-			About: &mac.AboutInfo{
-				Title:   "DKST Text Flow",
-				Message: "Text expansion utility by DINKI'ssTyle.",
-			},
-			DisableZoom: true,
+		Assets: application.AssetOptions{
+			Handler: application.AssetFileServerFS(assets),
 		},
-		Bind: []interface{}{
-			app,
+		Mac: application.MacOptions{
+			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 	})
 
+	// Create main window
+	mainWindow := appInst.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:                "main",
+		Title:               "DKST Text Flow",
+		Width:               900,
+		Height:              560,
+		MinWidth:            900,
+		MinHeight:           560,
+		Hidden:              true,
+		URL:                 "/",
+		MaximiseButtonState: application.ButtonDisabled,
+	})
+
+	// Hide main window on close instead of destroying it
+	mainWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		event.Cancel()
+		mainWindow.Hide()
+	})
+
+	// Create AI prompt window
+	aiWindow := appInst.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:                "ai",
+		Title:               "AI Assist",
+		Width:               460,
+		Height:              152,
+		MinWidth:            460,
+		MinHeight:           152,
+		AlwaysOnTop:         true,
+		Hidden:              true,
+		URL:                 "/?mode=hud",
+		Frameless:           true,
+		BackgroundType:      application.BackgroundTypeTransparent,
+		MaximiseButtonState: application.ButtonDisabled,
+		Mac: application.MacWindow{
+			TitleBar: application.MacTitleBar{
+				Hide:            true,
+				FullSizeContent: true,
+			},
+		},
+	})
+
+	// Hide AI window on close instead of destroying it
+	aiWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		event.Cancel()
+		aiWindow.Hide()
+	})
+
+	// Run the application
+	err := appInst.Run()
 	if err != nil {
-		println("Error:", err.Error())
+		log.Fatal("Error:", err.Error())
 	}
 }

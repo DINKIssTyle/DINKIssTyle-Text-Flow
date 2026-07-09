@@ -45,6 +45,11 @@ static char* DKSTBundleIDForPID(pid_t pid) {
     return strdup([value UTF8String]);
 }
 
+static int DKSTFrontmostPID(void) {
+    NSRunningApplication *app = [[NSWorkspace sharedWorkspace] frontmostApplication];
+    return (int)[app processIdentifier];
+}
+
 static int DKSTActivatePID(pid_t pid) {
     if (pid <= 0 || pid == getpid()) {
         return 0;
@@ -663,6 +668,10 @@ func appInfoFromBundlePath(path string) AppInfo {
 		BundleID: cString(C.DKSTBundleIDForBundlePath(value)),
 		Path:     path,
 	}
+}
+
+func getFrontmostPID() int {
+	return int(C.DKSTFrontmostPID())
 }
 
 func cString(value *C.char) string {
