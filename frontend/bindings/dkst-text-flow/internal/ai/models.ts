@@ -57,7 +57,7 @@ export interface Settings {
     "ttsEndpoint": string;
 
     /**
-     * e.g., "default"
+     * e.g., "default" or "M1", "F1", etc.
      */
     "ttsVoice": string;
 
@@ -75,4 +75,29 @@ export interface Settings {
      * Hotkey for TTS reading
      */
     "ttsShortcut": string;
+
+    /**
+     * Speech speed factor (0.7 - 2.0)
+     */
+    "ttsSpeed": number;
+
+    /**
+     * Number of denoising steps (5 - 12)
+     */
+    "ttsSteps": number;
+}
+
+/**
+ * TTSModelStatus holds status for downloading models
+ */
+export interface TTSModelStatus {
+    "isDownloaded": boolean;
+
+    /**
+     * "idle", "downloading", "done", "error"
+     */
+    "status": string;
+    "progress": number;
+    "currentFile": string;
+    "error"?: string;
 }

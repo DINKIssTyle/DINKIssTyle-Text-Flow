@@ -8,5 +8,6 @@ export {
 export type {
     AssistRequest,
     AssistResult,
-    Settings
+    Settings,
+    TTSModelStatus
 } from "./models.js";

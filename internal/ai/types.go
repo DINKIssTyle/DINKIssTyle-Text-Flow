@@ -31,13 +31,15 @@ type Settings struct {
 	PasteReplacementBundleIDs []string `json:"pasteReplacementBundleIds"`
 
 	// TTS Settings
-	TTSEnabled       bool   `json:"ttsEnabled"`
-	TTSEngine        string `json:"ttsEngine"`        // "os" or "supertonic3"
-	TTSEndpoint      string `json:"ttsEndpoint"`      // e.g., "http://localhost:7788"
-	TTSVoice         string `json:"ttsVoice"`         // e.g., "default"
-	TTSUseAIResponse bool   `json:"ttsUseAiResponse"` // Speak on AI response
-	TTSUseShortcut   bool   `json:"ttsUseShortcut"`   // Speak on shortcut hotkey
-	TTSShortcut      string `json:"ttsShortcut"`      // Hotkey for TTS reading
+	TTSEnabled       bool    `json:"ttsEnabled"`
+	TTSEngine        string  `json:"ttsEngine"`        // "os" or "supertonic3"
+	TTSEndpoint      string  `json:"ttsEndpoint"`      // e.g., "http://localhost:7788"
+	TTSVoice         string  `json:"ttsVoice"`         // e.g., "default" or "M1", "F1", etc.
+	TTSUseAIResponse bool    `json:"ttsUseAiResponse"` // Speak on AI response
+	TTSUseShortcut   bool    `json:"ttsUseShortcut"`   // Speak on shortcut hotkey
+	TTSShortcut      string  `json:"ttsShortcut"`      // Hotkey for TTS reading
+	TTSSpeed         float64 `json:"ttsSpeed"`         // Speech speed factor (0.7 - 2.0)
+	TTSSteps         int     `json:"ttsSteps"`         // Number of denoising steps (5 - 12)
 }
 
 type ContextKind string
@@ -93,10 +95,12 @@ func DefaultSettings() Settings {
 		TTSEnabled:       false,
 		TTSEngine:        "os",
 		TTSEndpoint:      "http://localhost:7788",
-		TTSVoice:         "default",
+		TTSVoice:         "M1",
 		TTSUseAIResponse: false,
 		TTSUseShortcut:   false,
 		TTSShortcut:      "Cmd+Shift+T",
+		TTSSpeed:         1.05,
+		TTSSteps:         8,
 	}
 }
 
@@ -163,13 +167,20 @@ func NormalizeSettings(settings Settings) Settings {
 	}
 
 	settings.TTSVoice = strings.TrimSpace(settings.TTSVoice)
-	if settings.TTSVoice == "" {
-		settings.TTSVoice = "default"
+	if settings.TTSVoice == "" || settings.TTSVoice == "default" {
+		settings.TTSVoice = "M1"
 	}
 
 	settings.TTSShortcut = strings.TrimSpace(settings.TTSShortcut)
 	if settings.TTSShortcut == "" {
 		settings.TTSShortcut = "Cmd+Shift+T"
+	}
+
+	if settings.TTSSpeed <= 0 {
+		settings.TTSSpeed = 1.05
+	}
+	if settings.TTSSteps <= 0 {
+		settings.TTSSteps = 8
 	}
 
 	return settings

@@ -23,6 +23,9 @@ import {
     GetDashboard,
     GetGeneralSettings,
     GetPlatformStatus,
+    GetTTSModelStatus,
+    StartTTSModelDownload,
+    CancelTTSModelDownload,
     ListLabels,
     ListSnippetsByLabel,
     RequestAccessibilityPermission,
@@ -32,6 +35,7 @@ import {
     SaveCommonAIPromptRule,
     SaveGeneralSettings,
     Speak,
+    TestSpeak,
     StopSpeaking,
     SetLabelSnippetsEnabled,
     ToggleSnippet,
@@ -297,6 +301,12 @@ function App() {
     const [platformStatus, setPlatformStatus] = useState<PlatformStatus | null>(null);
     const [generalSettings, setGeneralSettings] = useState<GeneralSettings | null>(null);
     const [aiSettings, setAISettings] = useState<AISettings | null>(null);
+    const [modelStatus, setModelStatus] = useState<any>({
+        isDownloaded: false,
+        status: 'idle',
+        progress: 0,
+        currentFile: '',
+    });
     const [aiPromptSettings, setAIPromptSettings] = useState<AIPromptSettings | null>(null);
     const [selectedPromptID, setSelectedPromptID] = useState('common');
     const [promptSaving, setPromptSaving] = useState(false);
@@ -408,6 +418,20 @@ function App() {
         GetGeneralSettings().then((settings) => setGeneralSettings(normalizeGeneralSettings(settings))).catch((err) => setError(String(err)));
         GetAISettings().then((settings) => setAISettings(normalizeAISettings(settings))).catch((err) => setError(String(err)));
         GetAIPromptSettings().then((settings) => setAIPromptSettings(normalizeAIPromptSettings(settings))).catch((err) => setError(String(err)));
+    }, []);
+
+    useEffect(() => {
+        GetTTSModelStatus().then((status) => {
+            setModelStatus(status);
+        }).catch((err) => console.error(err));
+
+        const cancel = Events.On('tts:download-progress', (event) => {
+            const status = event.data as any;
+            setModelStatus(status);
+        });
+        return () => {
+            cancel();
+        };
     }, []);
 
     useEffect(() => {
@@ -891,10 +915,12 @@ function App() {
             ttsEnabled: !!settings?.ttsEnabled,
             ttsEngine: settings?.ttsEngine || 'os',
             ttsEndpoint: settings?.ttsEndpoint || 'http://localhost:7788',
-            ttsVoice: settings?.ttsVoice || 'default',
+            ttsVoice: settings?.ttsVoice || 'M1',
             ttsUseAiResponse: !!settings?.ttsUseAiResponse,
             ttsUseShortcut: !!settings?.ttsUseShortcut,
             ttsShortcut: settings?.ttsShortcut || 'Cmd+Shift+T',
+            ttsSpeed: settings?.ttsSpeed || 1.05,
+            ttsSteps: settings?.ttsSteps || 8,
         } as any;
     }
 
@@ -1931,9 +1957,20 @@ function App() {
 
                                     <hr className="settings-divider" />
 
-                                    <div className="settings-section-header">
-                                        <h3>{t('ttsSettings')}</h3>
-                                        <p>{t('ttsSettingsDescription')}</p>
+                                    <div className="settings-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div>
+                                            <h3>{t('ttsSettings')}</h3>
+                                            <p>{t('ttsSettingsDescription')}</p>
+                                        </div>
+                                        <button
+                                            className="tts-test-playback-btn"
+                                            type="button"
+                                            onClick={() => {
+                                                TestSpeak("Hello! 안녕하세요. DKST Text Flow TTS 테스트입니다.", aiSettings).catch(err => alert(err));
+                                            }}
+                                        >
+                                            {t('testPlayback')}
+                                        </button>
                                     </div>
 
                                     <div className="check-row">
@@ -1999,28 +2036,99 @@ function App() {
 
                                     {/* @ts-ignore */}
                                     {aiSettings.ttsEngine === 'supertonic3' && (
-                                        <div className="settings-form-grid">
-                                            <label>
-                                                {t('supertonicEndpoint')}
-                                                <input
-                                                    // @ts-ignore
-                                                    value={aiSettings.ttsEndpoint || 'http://localhost:7788'}
-                                                    // @ts-ignore
-                                                    onChange={(event) => setAISettings({ ...aiSettings, ttsEndpoint: event.target.value })}
-                                                    placeholder="http://localhost:7788"
-                                                />
-                                            </label>
-                                            <label>
-                                                {t('supertonicVoice')}
-                                                <input
-                                                    // @ts-ignore
-                                                    value={aiSettings.ttsVoice || 'default'}
-                                                    // @ts-ignore
-                                                    onChange={(event) => setAISettings({ ...aiSettings, ttsVoice: event.target.value })}
-                                                    placeholder="default"
-                                                />
-                                            </label>
-                                        </div>
+                                        <>
+                                            <div className="settings-form-grid">
+                                                <label>
+                                                    {t('supertonicVoiceStyle')}
+                                                    <select
+                                                        // @ts-ignore
+                                                        value={aiSettings.ttsVoice || 'M1'}
+                                                        // @ts-ignore
+                                                        onChange={(event) => setAISettings({ ...aiSettings, ttsVoice: event.target.value })}
+                                                    >
+                                                        <option value="M1">{t('voiceM1')}</option>
+                                                        <option value="M2">{t('voiceM2')}</option>
+                                                        <option value="M3">{t('voiceM3')}</option>
+                                                        <option value="M4">{t('voiceM4')}</option>
+                                                        <option value="M5">{t('voiceM5')}</option>
+                                                        <option value="F1">{t('voiceF1')}</option>
+                                                        <option value="F2">{t('voiceF2')}</option>
+                                                        <option value="F3">{t('voiceF3')}</option>
+                                                        <option value="F4">{t('voiceF4')}</option>
+                                                        <option value="F5">{t('voiceF5')}</option>
+                                                    </select>
+                                                </label>
+                                            </div>
+                                            <div className="settings-form-grid" style={{ marginTop: '10px' }}>
+                                                <label>
+                                                    {t('supertonicSpeed')} ({aiSettings.ttsSpeed || 1.05})
+                                                    <input
+                                                        type="range"
+                                                        min="0.7"
+                                                        max="2.0"
+                                                        step="0.05"
+                                                        // @ts-ignore
+                                                        value={aiSettings.ttsSpeed || 1.05}
+                                                        // @ts-ignore
+                                                        onChange={(event) => setAISettings({ ...aiSettings, ttsSpeed: parseFloat(event.target.value) })}
+                                                    />
+                                                </label>
+                                                <label>
+                                                    {t('supertonicSteps')} ({aiSettings.ttsSteps || 8})
+                                                    <input
+                                                        type="range"
+                                                        min="5"
+                                                        max="12"
+                                                        step="1"
+                                                        // @ts-ignore
+                                                        value={aiSettings.ttsSteps || 8}
+                                                        // @ts-ignore
+                                                        onChange={(event) => setAISettings({ ...aiSettings, ttsSteps: parseInt(event.target.value) })}
+                                                    />
+                                                </label>
+                                            </div>
+                                            <div className="tts-model-status-section">
+                                                <div className="tts-model-status-title">
+                                                    {modelStatus.isDownloaded ? t('ttsModelReady') : (
+                                                        modelStatus.status === 'error' ? t('ttsModelDownloadFailed') : t('ttsModelNotReady')
+                                                    )}
+                                                    {modelStatus.status === 'error' && modelStatus.error && (
+                                                        <div style={{ color: '#ff4d4f', fontSize: '11px', marginTop: '4px', fontWeight: 'normal', wordBreak: 'break-all' }}>
+                                                            {modelStatus.error}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {modelStatus.status === 'downloading' && (
+                                                    <>
+                                                        <div className="tts-model-status-desc">
+                                                            {t('downloadingTtsModel', { progress: Math.round(modelStatus.progress) })}
+                                                            {modelStatus.currentFile && ` (${modelStatus.currentFile})`}
+                                                        </div>
+                                                        <div className="tts-model-progress-bar">
+                                                            <div className="tts-model-progress-fill" style={{ width: `${modelStatus.progress}%` }}></div>
+                                                        </div>
+                                                        <button
+                                                            className="tts-model-download-btn cancel"
+                                                            type="button"
+                                                            onClick={() => CancelTTSModelDownload()}
+                                                        >
+                                                            {t('cancel')}
+                                                        </button>
+                                                    </>
+                                                )}
+                                                {modelStatus.status !== 'downloading' && (
+                                                    <button
+                                                        className="tts-model-download-btn"
+                                                        type="button"
+                                                        onClick={() => {
+                                                            StartTTSModelDownload().catch(err => alert(err));
+                                                        }}
+                                                    >
+                                                        {t('downloadTtsModel')}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </>
                                     )}
                                 </form>
                             </>

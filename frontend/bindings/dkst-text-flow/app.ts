@@ -40,6 +40,10 @@ export function CancelAIRequest(): $CancellablePromise<void> {
     return $Call.ByID(154486394);
 }
 
+export function CancelTTSModelDownload(): $CancellablePromise<void> {
+    return $Call.ByID(1270262625);
+}
+
 export function ConfirmLabelDeletion(name: string): $CancellablePromise<boolean> {
     return $Call.ByID(2768525009, name);
 }
@@ -90,6 +94,10 @@ export function GetGeneralSettings(): $CancellablePromise<$models.GeneralSetting
 
 export function GetPlatformStatus(): $CancellablePromise<platform$0.Status> {
     return $Call.ByID(2605037362);
+}
+
+export function GetTTSModelStatus(): $CancellablePromise<ai$0.TTSModelStatus> {
+    return $Call.ByID(1521521987);
 }
 
 export function ListLabels(): $CancellablePromise<storage$0.Label[] | null> {
@@ -144,8 +152,16 @@ export function Speak(text: string): $CancellablePromise<void> {
     return $Call.ByID(1892369553, text);
 }
 
+export function StartTTSModelDownload(): $CancellablePromise<void> {
+    return $Call.ByID(1241213861);
+}
+
 export function StopSpeaking(): $CancellablePromise<void> {
     return $Call.ByID(3590611999);
+}
+
+export function TestSpeak(text: string, settings: ai$0.Settings): $CancellablePromise<void> {
+    return $Call.ByID(1255303217, text, settings);
 }
 
 export function ToggleSnippet(id: number, enabled: boolean): $CancellablePromise<storage$0.Snippet> {

@@ -1719,3 +1719,95 @@ h2 {
     font-size: 12px;
     color: var(--muted);
 }
+
+.settings-form-grid input[type="range"] {
+    padding: 0;
+    height: auto;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    accent-color: var(--primary);
+}
+
+.tts-model-status-section {
+    margin-top: 15px;
+    padding: 12px;
+    background: var(--panel-bg);
+    border: 1px solid var(--control-border);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.tts-model-status-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.tts-model-status-desc {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.tts-model-progress-bar {
+    width: 100%;
+    height: 8px;
+    background: var(--control-border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.tts-model-progress-fill {
+    height: 100%;
+    background: var(--primary);
+    transition: width 0.2s ease;
+}
+
+.tts-model-download-btn {
+    align-self: flex-start;
+    padding: 6px 12px;
+    background: var(--primary);
+    color: white;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: opacity 0.2s ease;
+}
+
+.tts-model-download-btn:hover {
+    opacity: 0.9;
+}
+
+.tts-model-download-btn.cancel {
+    background: transparent;
+    border: 1px solid var(--control-border);
+    color: var(--text);
+}
+
+.tts-model-download-btn:disabled {
+    background: var(--control-border);
+    color: var(--muted);
+    cursor: not-allowed;
+}
+
+.tts-test-playback-btn {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px solid var(--control-border);
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tts-test-playback-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}

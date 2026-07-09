@@ -1,14 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,6 +87,8 @@ type App struct {
 	ttsCmd                *exec.Cmd
 	ttsMu                 sync.Mutex
 	systray               *application.SystemTray
+	supertonicEngine      *ai.SupertonicEngine
+	supertonicEngineMu    sync.Mutex
 }
 
 // NewApp creates a new App application struct
@@ -153,6 +151,13 @@ func (a *App) ServiceShutdown() error {
 		a.expansionSoundStopper = nil
 	}
 	flowengine.Stop()
+	a.supertonicEngineMu.Lock()
+	if a.supertonicEngine != nil {
+		a.supertonicEngine.Destroy()
+		a.supertonicEngine = nil
+	}
+	a.supertonicEngineMu.Unlock()
+
 	if a.store == nil {
 		return nil
 	}
@@ -474,6 +479,33 @@ func (a *App) SaveAISettings(settings ai.Settings) (ai.Settings, error) {
 	return normalized, nil
 }
 
+func (a *App) GetTTSModelStatus() (ai.TTSModelStatus, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return ai.TTSModelStatus{}, fmt.Errorf("failed to resolve user config dir: %w", err)
+	}
+	supertonicDir := filepath.Join(configDir, "DKST Text Flow", "supertonic")
+	return ai.CheckModelStatus(supertonicDir), nil
+}
+
+func (a *App) StartTTSModelDownload() error {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to resolve user config dir: %w", err)
+	}
+	supertonicDir := filepath.Join(configDir, "DKST Text Flow", "supertonic")
+	return ai.StartTTSModelDownload(supertonicDir, func(status ai.TTSModelStatus) {
+		appInst := application.Get()
+		if appInst != nil {
+			appInst.Event.Emit("tts:download-progress", status)
+		}
+	})
+}
+
+func (a *App) CancelTTSModelDownload() {
+	ai.CancelTTSModelDownload()
+}
+
 func (a *App) MakeAIRequest(endpoint string, headers map[string]string, body string) (string, error) {
 	if a.aiClient == nil {
 		a.aiClient = ai.NewClient()
@@ -669,6 +701,20 @@ func (a *App) normalizeAISettings(settings ai.Settings) ai.Settings {
 }
 
 func (a *App) Speak(text string) error {
+	settings, err := a.GetAISettings()
+	if err != nil {
+		return err
+	}
+	return a.speakWithSettings(text, settings, true)
+}
+
+func (a *App) TestSpeak(text string, settings ai.Settings) error {
+	settings = a.normalizeAISettings(settings)
+	settings.TTSEnabled = true
+	return a.speakWithSettings(text, settings, false)
+}
+
+func (a *App) speakWithSettings(text string, settings ai.Settings, requireEnabled bool) error {
 	a.ttsMu.Lock()
 	defer a.ttsMu.Unlock()
 
@@ -684,12 +730,7 @@ func (a *App) Speak(text string) error {
 		return nil
 	}
 
-	settings, err := a.GetAISettings()
-	if err != nil {
-		return err
-	}
-
-	if !settings.TTSEnabled {
+	if requireEnabled && !settings.TTSEnabled {
 		return errors.New("TTS is disabled in settings")
 	}
 
@@ -710,46 +751,65 @@ func (a *App) Speak(text string) error {
 		}(a.ttsCmd)
 
 	case "supertonic3":
-		endpoint := strings.TrimRight(settings.TTSEndpoint, "/") + "/v1/audio/speech"
-		payload := map[string]interface{}{
-			"model": "supertonic",
-			"input": text,
-			"voice": settings.TTSVoice,
-		}
-		payloadBytes, err := json.Marshal(payload)
+		configDir, err := os.UserConfigDir()
 		if err != nil {
-			return fmt.Errorf("failed to marshal supertonic payload: %w", err)
+			return fmt.Errorf("failed to resolve user config dir: %w", err)
+		}
+		supertonicDir := filepath.Join(configDir, "DKST Text Flow", "supertonic")
+
+		status := ai.CheckModelStatus(supertonicDir)
+		if !status.IsDownloaded {
+			return errors.New("TTS model and runtime are not downloaded; please configure them in settings")
 		}
 
-		req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(payloadBytes))
+		// Initialize local engine if not loaded yet
+		a.supertonicEngineMu.Lock()
+		if a.supertonicEngine == nil {
+			engine, err := ai.LoadSupertonicEngine(supertonicDir)
+			if err != nil {
+				a.supertonicEngineMu.Unlock()
+				return fmt.Errorf("failed to load local Supertonic engine: %w", err)
+			}
+			a.supertonicEngine = engine
+		}
+		engine := a.supertonicEngine
+		a.supertonicEngineMu.Unlock()
+
+		// Load selected voice style JSON
+		voiceStylePath := filepath.Join(supertonicDir, "voice_styles", settings.TTSVoice+".json")
+		style, err := ai.LoadVoiceStyle(voiceStylePath)
 		if err != nil {
-			return fmt.Errorf("failed to create request: %w", err)
+			return fmt.Errorf("failed to load voice style %s: %w", settings.TTSVoice, err)
 		}
-		req.Header.Set("Content-Type", "application/json")
+		defer style.Destroy()
 
-		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err := client.Do(req)
+		// Determine language: Check if Korean Hangul is present, otherwise language-agnostic "na"
+		lang := "na"
+		for _, r := range text {
+			if r >= 0xAC00 && r <= 0xD7A3 {
+				lang = "ko"
+				break
+			}
+		}
+
+		// Synthesize waveform
+		wavData, err := engine.Synthesize(text, lang, style, settings.TTSSteps, float32(settings.TTSSpeed))
 		if err != nil {
-			return fmt.Errorf("failed to call supertonic endpoint: %w", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("supertonic returned status %d: %s", resp.StatusCode, string(bodyBytes))
+			return fmt.Errorf("failed to synthesize speech: %w", err)
 		}
 
-		tempFile, err := os.CreateTemp("", "dkst-tts-*.mp3")
+		// Write to a temporary WAV file
+		tempFile, err := os.CreateTemp("", "dkst-tts-*.wav")
 		if err != nil {
 			return fmt.Errorf("failed to create temp file: %w", err)
 		}
 		tempFilePath := tempFile.Name()
-		defer tempFile.Close()
+		_ = tempFile.Close() // close immediately so we can write to it using WriteWav
 
-		_, err = io.Copy(tempFile, resp.Body)
+		err = ai.WriteWav(tempFilePath, wavData, engine.SampleRate)
 		if err != nil {
 			_ = os.Remove(tempFilePath)
-			return fmt.Errorf("failed to write audio to temp file: %w", err)
+			return fmt.Errorf("failed to write WAV data: %w", err)
 		}
 
 		a.ttsCmd = exec.Command("afplay", tempFilePath)

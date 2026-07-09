@@ -5,6 +5,8 @@ go 1.25.0
 require (
 	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/wailsapp/wails/v3 v3.0.0-alpha2.117
+	github.com/yalue/onnxruntime_go v1.11.0
+	golang.org/x/text v0.37.0
 )
 
 require (
