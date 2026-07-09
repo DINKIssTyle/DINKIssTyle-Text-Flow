@@ -49,6 +49,12 @@ func main() {
 		mainWindow.Hide()
 	})
 
+	// Intercept macOS Dock click to show only the main window and avoid showing other windows (like AI Assist)
+	appInst.Event.RegisterApplicationEventHook(events.Mac.ApplicationShouldHandleReopen, func(event *application.ApplicationEvent) {
+		event.Cancel()
+		app.showMainWindow()
+	})
+
 	// Create AI prompt window
 	aiWindow := appInst.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:                "ai",

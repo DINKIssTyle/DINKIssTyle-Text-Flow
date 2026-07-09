@@ -81,8 +81,8 @@ fi
 RESOURCE_DIR="$APP_PATH/Contents/Resources"
 mkdir -p "$RESOURCE_DIR"
 
-if [[ -f "$ROOT_DIR/build/menu_icon.pdf" ]]; then
-  cp "$ROOT_DIR/build/menu_icon.pdf" "$RESOURCE_DIR/menu_icon.pdf"
+if [[ -f "$ROOT_DIR/build/menu_icon.png" ]]; then
+  cp "$ROOT_DIR/build/menu_icon.png" "$RESOURCE_DIR/menu_icon.png"
 fi
 
 xattr -cr "$APP_PATH"

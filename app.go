@@ -26,7 +26,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-//go:embed build/menu_icon.pdf
+//go:embed build/menu_icon.png
 var menuIcon []byte
 
 const (
@@ -122,28 +122,22 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 	a.systray = appInst.SystemTray.New()
 	a.systray.SetTemplateIcon(menuIcon)
 	a.systray.SetTooltip("DKST Text Flow")
-	a.systray.OnClick(func() {
-		println("[DEBUG] Systray clicked!")
-		mainWin, ok := appInst.Window.GetByName("main")
-		println("[DEBUG] mainWin found:", ok)
-		if ok {
-			visible := mainWin.IsVisible()
-			println("[DEBUG] mainWin visible:", visible)
-			if visible {
-				mainWin.Hide()
-			} else {
-				mainWin.SetAlwaysOnTop(false)
-				mainWin.UnMinimise()
-				mainWin.SetMinSize(900, 560)
-				mainWin.SetSize(900, 560)
-				mainWin.Center()
-				mainWin.Show()
-				mainWin.Focus()
-				appInst.Show()
-				appInst.Event.Emit("app:show-main")
-			}
-		}
+
+	trayMenu := appInst.NewMenu()
+	trayMenu.Add("Ask AI").OnClick(func(ctx *application.Context) {
+		a.showAIPrompt(platform.GetFrontmostPID(), false)
 	})
+	trayMenu.Add("Main Window").OnClick(func(ctx *application.Context) {
+		a.showMainWindow()
+	})
+	trayMenu.AddSeparator()
+	trayMenu.Add("Quit").OnClick(func(ctx *application.Context) {
+		appInst.Quit()
+	})
+	a.systray.SetMenu(trayMenu)
+	if aiWin, ok := appInst.Window.GetByName("ai"); ok {
+		a.systray.AttachWindow(aiWin)
+	}
 
 	return nil
 }
@@ -533,6 +527,23 @@ func (a *App) CancelAIRequest() {
 	}
 }
 
+func (a *App) showMainWindow() {
+	appInst := application.Get()
+	if mainWin, ok := appInst.Window.GetByName("main"); ok {
+		application.InvokeSync(func() {
+			mainWin.SetAlwaysOnTop(false)
+			mainWin.UnMinimise()
+			mainWin.SetMinSize(900, 560)
+			mainWin.SetSize(900, 560)
+			mainWin.Center()
+			mainWin.Show()
+			mainWin.Focus()
+			appInst.Show()
+			appInst.Event.Emit("app:show-main")
+		})
+	}
+}
+
 func (a *App) startExpansionSoundDispatcher(ctx context.Context) {
 	if a.expansionSoundStopper != nil {
 		return
@@ -598,8 +609,12 @@ func (a *App) configureAIHotkeyWithSettings(settings ai.Settings) {
 }
 
 func (a *App) handleAIHotkey(sourceProcessID int) {
+	a.showAIPrompt(sourceProcessID, true)
+}
+
+func (a *App) showAIPrompt(sourceProcessID int, requireEnabled bool) {
 	settings, err := a.GetAISettings()
-	if err != nil || !settings.Enabled {
+	if err != nil || (requireEnabled && !settings.Enabled) {
 		return
 	}
 
@@ -619,7 +634,7 @@ func (a *App) handleAIHotkey(sourceProcessID int) {
 			invocation.Label = "Selected Text"
 		}
 	}
-	if invocation.Kind == ai.ContextNone && !rule.RunWithoutSelection {
+	if requireEnabled && invocation.Kind == ai.ContextNone && !rule.RunWithoutSelection {
 		return
 	}
 
