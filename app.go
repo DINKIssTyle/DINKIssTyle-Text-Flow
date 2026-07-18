@@ -117,31 +117,14 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 
 	// Initialize the system tray
 	appInst := application.Get()
-	a.systray = appInst.SystemTray.New()
-	a.systray.SetTemplateIcon(menuIcon)
-	a.systray.SetTooltip("DKST Text Flow")
-
-	trayMenu := appInst.NewMenu()
-	trayMenu.Add("Ask AI").OnClick(func(ctx *application.Context) {
-		a.showAIPrompt(platform.GetFrontmostPID(), false)
-	})
-	trayMenu.Add("Main Window").OnClick(func(ctx *application.Context) {
-		a.showMainWindow()
-	})
-	trayMenu.AddSeparator()
-	trayMenu.Add("Quit").OnClick(func(ctx *application.Context) {
-		appInst.Quit()
-	})
-	a.systray.SetMenu(trayMenu)
-	if aiWin, ok := appInst.Window.GetByName("ai"); ok {
-		a.systray.AttachWindow(aiWin)
-	}
+	a.configureSystemTray(appInst)
 
 	return nil
 }
 
 func (a *App) ServiceShutdown() error {
 	appInst := application.Get()
+	a.destroySystemTray()
 	if appInst.GlobalShortcut != nil {
 		_ = appInst.GlobalShortcut.UnregisterAll()
 	}

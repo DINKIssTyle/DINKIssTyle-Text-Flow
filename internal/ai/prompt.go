@@ -26,16 +26,20 @@ var commonSystemPromptLines = []string{
 
 var editIntentDecisionLines = []string{
 	"## Intent decision protocol",
-	"1. **Primary Goal**: Determine if the user's intent is to modify the current document or generate content for immediate use. If the desired output is usable text rather than a conversational response, you MUST select <intent>edit</intent>.",
-	"2. **Edit Intent Trigger**: Classify as <intent>edit</intent> for any commands involving:",
-	"   - Content Creation: input, enter, insert, write, draft, compose, generate, create, or put.",
-	"   - Text Refinement: edit, revise, rewrite, polish, correct, fix, improve, or clean up.",
-	"   - Transformations: translate, summarize, shorten, expand, convert, format, or change tone/style.",
-	"   - Direct Replacement: replace, swap, or update existing text.",
-	"3. **Edit Preference**: When an instruction can reasonably be understood as producing text for insertion or replacement, prefer edit over question or ambiguous.",
-	"4. **Question Intent Trigger**: Use <intent>question</intent> ONLY when the user strictly seeks information, explanations, or meta-discussion about the text without requesting any generation or modification of the content itself.",
-	"5. **Ambiguity Resolution**: If a request is borderline (e.g., 'Make this better'), always prioritize <intent>edit</intent>. Only use <intent>ambiguous</intent> if there is zero contextual evidence to decide between a conversation or a text action.",
-	"6. **Constraint**: Even if the user frames the request as a question (e.g., 'Can you translate this?'), treat it as <intent>edit</intent> because the ultimate goal is a text transformation.",
+	"Classify by the requested outcome and its destination, not by keywords, grammar, politeness, or the language in which the instruction is written.",
+	"Before choosing an intent, privately perform this decision audit in order. Do not reveal the audit or any reasoning:",
+	"A. State the concrete outcome the instruction asks the assistant to produce.",
+	"B. Determine the intended destination of that outcome: the AI window for the user to read, or the current document/app for insertion or replacement.",
+	"C. Check whether the assistant is being asked to exercise judgment (such as evaluating possibilities or reaching a decision) and merely report the result to the user.",
+	"D. Check separately for explicit evidence that the user wants the selected text changed or wants new content inserted into the current app.",
+	"E. Resolve conflicts by giving explicit destination evidence priority. A requested judgment without explicit document-editing evidence belongs in the AI window.",
+	"F. Only after completing A-E, emit the intent and final response in the required XML format.",
+	"1. **Conversation outcome**: Select <intent>question</intent> when the requested result is an answer to be shown to the user in the AI window. This includes asking the assistant to evaluate alternatives, make a choice or decision, recommend an option, state a preference, explain, identify, compare, judge, or report a conclusion.",
+	"2. **Document outcome**: Select <intent>edit</intent> only when the requested result is content meant to be inserted into the current app or a modification of the selected text itself. This includes creating an insertion-ready artifact and transforming, correcting, translating, formatting, or replacing document text.",
+	"3. **Destination overrides surface form**: A conversational request can produce usable text and still be <intent>question</intent>. A request phrased as a question can still be <intent>edit</intent> when its actual goal is document insertion or transformation.",
+	"4. **Decision precedence**: A request to choose, decide, recommend, rank, or select among possibilities is <intent>question</intent> unless the instruction explicitly asks to write that decision into the document or replace selected text with it.",
+	"5. **Selected text is context, not an automatic edit target**: Referring to or asking about selected text does not imply permission to replace it.",
+	"6. **Ambiguity resolution**: Infer the destination from the whole instruction. Use <intent>ambiguous</intent> only when there is no reasonable evidence that the result belongs either in the AI window or in the current document.",
 }
 
 // --- Functions ---
