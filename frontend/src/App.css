@@ -288,15 +288,16 @@ button:not(:disabled):focus-visible {
 }
 
 .hud-shell .workspace {
-    height: 100vh;
-    padding: 8px;
+    height: 100%;
+    box-sizing: border-box;
+    padding: 9px 11px 11px;
+    overflow: hidden;
 }
 
 .ai-hud {
     display: grid;
     align-content: start;
-    gap: 8px;
-    height: 100%;
+    gap: 9px;
 }
 
 .hud-header {
@@ -306,32 +307,104 @@ button:not(:disabled):focus-visible {
     gap: 10px;
 }
 
+.hud-title {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 9px;
+}
+
+.hud-title-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9px;
+    background: var(--active-bg);
+    color: var(--primary);
+    font-size: 17px;
+    font-variation-settings: "FILL" 1, "wght" 500;
+}
+
 .hud-header h1 {
-    font-size: 15px;
+    font-size: 14px;
+    line-height: 17px;
 }
 
 .hud-header p {
     color: var(--muted);
     font-size: 11px;
+    line-height: 14px;
 }
 
-.hud-header button {
-    height: 26px;
-    padding: 0 9px;
-    font-size: 12px;
+.hud-header .hud-close-button {
+    display: inline-flex;
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: var(--subtle-bg);
+    color: var(--muted);
+}
+
+.hud-close-button .material-symbols-rounded {
+    font-size: 18px;
+    font-variation-settings: "wght" 500;
 }
 
 .hud-prompt-form {
     grid-template-columns: 1fr auto;
-    align-items: end;
-    gap: 8px;
+    align-items: center;
+    gap: 7px;
+}
+
+.hud-prompt-form textarea {
+    min-height: 40px;
+    padding: 9px 12px;
+    border-radius: 11px;
+    background: var(--panel-bg);
+}
+
+.hud-prompt-form .prompt-actions button {
+    min-width: 62px;
+    height: 40px;
+    border-radius: 11px;
 }
 
 .hud-result {
-    max-height: 158px;
+    max-height: 220px;
     overflow: auto;
     margin-top: 0;
+    padding: 11px 12px;
+    border-radius: 10px;
     font-size: 12px;
+    line-height: 1.55;
+    animation: hud-content-in 0.18s ease-out;
+}
+
+.hud-result p {
+    white-space: pre-wrap;
+}
+
+.ai-hud>.ai-progress-status {
+    animation: hud-content-in 0.18s ease-out;
+}
+
+@keyframes hud-content-in {
+    from {
+        opacity: 0;
+        transform: translateY(-3px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .dashboard {

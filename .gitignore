@@ -1,7 +1,63 @@
-build/bin
-node_modules
-frontend/dist
-.cache/
-Note/
-*test.go
+# OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Go Build & Executable Artifacts
+bin/
+build/bin/
+*.app/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+dkst-text-flow
+
+# Go Test Artifacts & Coverage
+*.test
+*.out
+*.prof
+c.out
+coverage.txt
+coverage.html
+coverage.xml
+
+# Go, Wails & Task Build Cache
+.cache/
+.go/
+.task/
+.wails/
+wails.json.tmp
+
+# Frontend Build & Temporary Artifacts
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.bindings-tmp*
+package.json.md5
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Mobile / iOS Build Artifacts
+build/ios/DerivedData/
+
+# User Notes
+Note/

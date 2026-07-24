@@ -60,6 +60,10 @@ type AIInvocationContext = {
     appBundleId: string;
 };
 
+const aiHUDWidth = 460;
+const aiHUDCollapsedHeight = 112;
+const aiHUDMaxHeight = 420;
+
 const emptyInput: SnippetInput = {
     labelId: 0,
     shortcut: '',
@@ -1121,6 +1125,7 @@ function App() {
         }
         textarea.style.height = 'auto';
         textarea.style.height = `${Math.min(textarea.scrollHeight, 118)}px`;
+        window.requestAnimationFrame(resizeAIHUD);
     }
 
     function resizeAIHUD() {
@@ -1128,16 +1133,20 @@ function App() {
             return;
         }
         window.requestAnimationFrame(() => {
-            const promptHeight = aiPromptRef.current?.offsetHeight ?? 34;
-            const hasResult = Boolean(aiResult || aiReplacement);
-            const statusHeight = aiRunning
-                ? Math.min(document.querySelector<HTMLElement>('.ai-progress-status')?.scrollHeight ?? 0, 54)
-                : 0;
-            const resultHeight = hasResult
-                ? Math.min(document.querySelector<HTMLElement>('.hud-result')?.scrollHeight ?? 0, 150)
-                : 0;
-            const nextHeight = Math.max(152, Math.min(360, 118 + promptHeight + statusHeight + resultHeight + (hasResult ? 18 : 0)));
-            Window.SetSize(460, nextHeight);
+            const hud = document.querySelector<HTMLElement>('.ai-hud');
+            const workspace = document.querySelector<HTMLElement>('.hud-shell .workspace');
+            if (!hud || !workspace) {
+                return;
+            }
+            const workspaceStyle = window.getComputedStyle(workspace);
+            const verticalPadding =
+                Number.parseFloat(workspaceStyle.paddingTop) +
+                Number.parseFloat(workspaceStyle.paddingBottom);
+            const nextHeight = Math.max(
+                aiHUDCollapsedHeight,
+                Math.min(aiHUDMaxHeight, Math.ceil(hud.scrollHeight + verticalPadding + 2)),
+            );
+            Window.SetSize(aiHUDWidth, nextHeight);
             Window.Center();
         });
     }
@@ -1333,15 +1342,21 @@ function App() {
                 {windowMode === 'hud' ? (
                     <section className="ai-hud">
                         <div className="hud-header">
-                            <div>
-                                <h1>{t('aiAssist')}</h1>
-                                <p>{aiContext.kind === 'selected_text' ? t('charactersSelected', { count: aiContext.text.length }) : t('noSelectedText')}</p>
+                            <div className="hud-title">
+                                <span className="hud-title-icon material-symbols-rounded" aria-hidden="true">auto_awesome</span>
+                                <div>
+                                    <h1>{t('aiAssist')}</h1>
+                                    <p>{aiContext.kind === 'selected_text' ? t('charactersSelected', { count: aiContext.text.length }) : t('noSelectedText')}</p>
+                                </div>
                             </div>
                             <button
+                                className="hud-close-button"
                                 type="button"
                                 onClick={() => hideCurrentWindow()}
+                                aria-label={t('close')}
+                                title={t('close')}
                             >
-                                {t('close')}
+                                <span className="material-symbols-rounded" aria-hidden="true">close</span>
                             </button>
                         </div>
                         <form className="ai-prompt-form hud-prompt-form" onSubmit={submitAIPrompt}>

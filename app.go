@@ -656,8 +656,8 @@ func (a *App) showAIPrompt(sourceProcessID int, requireEnabled bool) {
 	appInst := application.Get()
 	if aiWin, ok := appInst.Window.GetByName("ai"); ok {
 		application.InvokeSync(func() {
-			aiWin.SetMinSize(460, 152)
-			aiWin.SetSize(460, 152)
+			aiWin.SetMinSize(460, 112)
+			aiWin.SetSize(460, 112)
 			aiWin.Center()
 			aiWin.SetAlwaysOnTop(true)
 			aiWin.UnMinimise()
