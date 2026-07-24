@@ -64,3 +64,4 @@ Note/
 bin/DKST Text Flow
 internal/ai/prompt_test.go
 bin/DKST Text Flow
+internal/ai/apple_intelligence_test.go

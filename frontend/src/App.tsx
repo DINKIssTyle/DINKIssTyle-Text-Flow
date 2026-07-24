@@ -19,6 +19,7 @@ import {
     DeleteLabel,
     DeleteSnippet,
     GetAISettings,
+    GetAppleIntelligenceStatus,
     GetAIPromptSettings,
     GetDashboard,
     GetGeneralSettings,
@@ -30,6 +31,7 @@ import {
     ListSnippetsByLabel,
     RequestAccessibilityPermission,
     ReplaceSelectedText,
+    ResizeAIPromptWindow,
     RunAIAssist,
     SaveAISettings,
     SaveCommonAIPromptRule,
@@ -43,7 +45,7 @@ import {
     UpdateLabel,
     UpdateSnippet,
 } from "../bindings/dkst-text-flow/app";
-import { Application, Events, Window } from "@wailsio/runtime";
+import { Application, Clipboard, Events, Window } from "@wailsio/runtime";
 
 import { Snippet, SnippetInput, Label, LabelInput, DashboardStats, DailyTypingStat } from "../bindings/dkst-text-flow/internal/storage/models";
 import { Status as PlatformStatus } from "../bindings/dkst-text-flow/internal/platform/models";
@@ -60,8 +62,7 @@ type AIInvocationContext = {
     appBundleId: string;
 };
 
-const aiHUDWidth = 460;
-const aiHUDCollapsedHeight = 112;
+const aiHUDCollapsedHeight = 74;
 const aiHUDMaxHeight = 420;
 
 const emptyInput: SnippetInput = {
@@ -223,6 +224,35 @@ function aiStatusLabel(elapsedMs: number, t: Translator) {
     return t('generatingResponse');
 }
 
+type AppleIntelligenceStatusInfo = {
+    available: boolean;
+    state: string;
+    detail?: string;
+};
+
+function appleIntelligenceStatusLabel(status: AppleIntelligenceStatusInfo, t: Translator) {
+    switch (status.state) {
+    case 'available':
+        return t('appleIntelligenceAvailable');
+    case 'device_not_eligible':
+        return t('appleIntelligenceDeviceNotEligible');
+    case 'not_enabled':
+        return t('appleIntelligenceNotEnabled');
+    case 'model_not_ready':
+        return t('appleIntelligenceModelNotReady');
+    case 'os_unsupported':
+        return t('appleIntelligenceOSUnsupported');
+    case 'sdk_unavailable':
+        return t('appleIntelligenceSDKUnavailable');
+    case 'helper_unavailable':
+        return t('appleIntelligenceHelperUnavailable');
+    case 'checking':
+        return t('appleIntelligenceChecking');
+    default:
+        return t('appleIntelligenceUnavailable');
+    }
+}
+
 type MarkdownAlertType = 'tip' | 'important' | 'caution';
 
 const markdownAlertLabels: Record<MarkdownAlertType, string> = {
@@ -305,6 +335,10 @@ function App() {
     const [platformStatus, setPlatformStatus] = useState<PlatformStatus | null>(null);
     const [generalSettings, setGeneralSettings] = useState<GeneralSettings | null>(null);
     const [aiSettings, setAISettings] = useState<AISettings | null>(null);
+    const [appleIntelligenceStatus, setAppleIntelligenceStatus] = useState<AppleIntelligenceStatusInfo>({
+        available: false,
+        state: 'checking',
+    });
     const [modelStatus, setModelStatus] = useState<any>({
         isDownloaded: false,
         status: 'idle',
@@ -336,6 +370,7 @@ function App() {
     const [aiReplacement, setAIReplacement] = useState('');
     const [aiRunning, setAIRunning] = useState(false);
     const [aiElapsedMs, setAIElapsedMs] = useState(0);
+    const [aiResponseAction, setAIResponseAction] = useState<'idle' | 'copying' | 'copied' | 'inserting'>('idle');
     const [recordingHotkey, setRecordingHotkey] = useState(false);
     const [recordingTtsHotkey, setRecordingTtsHotkey] = useState(false);
     const [hasBeenInvoked, setHasBeenInvoked] = useState(false);
@@ -349,6 +384,13 @@ function App() {
         appBundleId: '',
     });
     const aiPromptRef = useRef<HTMLTextAreaElement | null>(null);
+    const aiHUDHeightRef = useRef(aiHUDCollapsedHeight);
+    const aiHUDMeasureFrameRef = useRef<number | null>(null);
+    const aiResponseActionTimerRef = useRef<number | null>(null);
+    // Invalidates callbacks from requests that belonged to a closed or replaced HUD session.
+    const aiRequestGenerationRef = useRef(0);
+    const aiRequestRunningRef = useRef(false);
+    const aiInsertionInFlightRef = useRef(false);
     const snippetContentRef = useRef<HTMLTextAreaElement | null>(null);
     const shortcutInputRef = useRef<HTMLInputElement | null>(null);
     const soundNameRef = useRef(noSoundName);
@@ -477,6 +519,13 @@ function App() {
     }, [generalSettings?.themeMode]);
 
     useEffect(() => {
+        if (isHUD || aiSettings?.provider !== 'apple_intelligence') {
+            return;
+        }
+        refreshAppleIntelligenceStatus();
+    }, [aiSettings?.provider, isHUD]);
+
+    useEffect(() => {
         if (detailMode === 'label' && selectedLabel) {
             setLabelForm({
                 name: selectedLabel.name,
@@ -526,6 +575,11 @@ function App() {
         }
         const cancel = Events.On('ai:invoke', (event) => {
             const context = event.data as AIInvocationContext;
+            const shouldCancelPreviousRequest = aiRequestRunningRef.current;
+            resetAIHUDContent();
+            if (shouldCancelPreviousRequest) {
+                CancelAIRequest().catch((err) => setError(String(err)));
+            }
             setHasBeenInvoked(true);
             setWindowMode('hud');
             setActiveView('ai');
@@ -538,9 +592,6 @@ function App() {
                 appName: context?.appName || '',
                 appBundleId: context?.appBundleId || '',
             });
-            setAIPrompt('');
-            setAIResult('');
-            setAIReplacement('');
             window.setTimeout(() => {
                 aiPromptRef.current?.focus();
                 resizeAIPrompt();
@@ -567,6 +618,17 @@ function App() {
     useEffect(() => {
         resizeAIHUD();
     }, [aiResult, aiReplacement, aiRunning, windowMode, aiElapsedMs]);
+
+    useEffect(() => {
+        return () => {
+            if (aiHUDMeasureFrameRef.current !== null) {
+                window.cancelAnimationFrame(aiHUDMeasureFrameRef.current);
+            }
+            if (aiResponseActionTimerRef.current !== null) {
+                window.clearTimeout(aiResponseActionTimerRef.current);
+            }
+        };
+    }, []);
 
     useEffect(() => {
         if (!aiRunning) {
@@ -800,21 +862,68 @@ function App() {
         }
     }
 
+    async function refreshAppleIntelligenceStatus() {
+        setAppleIntelligenceStatus({ available: false, state: 'checking' });
+        try {
+            const status = await GetAppleIntelligenceStatus();
+            setAppleIntelligenceStatus({
+                available: !!status.available,
+                state: status.state || 'unavailable',
+                detail: status.detail || '',
+            });
+        } catch (err) {
+            setAppleIntelligenceStatus({
+                available: false,
+                state: 'helper_unavailable',
+                detail: String(err),
+            });
+        }
+    }
+
+    function resetAIHUDContent() {
+        aiRequestGenerationRef.current += 1;
+        aiRequestRunningRef.current = false;
+        if (aiHUDMeasureFrameRef.current !== null) {
+            window.cancelAnimationFrame(aiHUDMeasureFrameRef.current);
+            aiHUDMeasureFrameRef.current = null;
+        }
+        if (aiResponseActionTimerRef.current !== null) {
+            window.clearTimeout(aiResponseActionTimerRef.current);
+            aiResponseActionTimerRef.current = null;
+        }
+        aiHUDHeightRef.current = aiHUDCollapsedHeight;
+        setAIPrompt('');
+        setAIResult('');
+        setAIReplacement('');
+        setAIElapsedMs(0);
+        setAIResponseAction('idle');
+        setAIRunning(false);
+        setAIContext({
+            kind: 'none',
+            text: '',
+            filePath: '',
+            label: 'No Context',
+            sourceProcessId: 0,
+            appName: '',
+            appBundleId: '',
+        });
+    }
+
     async function hideCurrentWindow(cancelRunning = true) {
         setHasBeenInvoked(false);
+        const shouldCancelRequest = cancelRunning && aiRequestRunningRef.current;
+        resetAIHUDContent();
         if (cancelRunning) {
             StopSpeaking().catch(() => {});
-            if (aiRunning) {
+            if (shouldCancelRequest) {
                 try {
                     await CancelAIRequest();
                 } catch (err) {
                     setError(String(err));
-                } finally {
-                    setAIRunning(false);
                 }
             }
         }
-        Window.Hide();
+        await Window.Hide();
     }
 
     function normalizeGeneralSettings(settings: { themeMode?: string; language?: string; typingTrendEnabled?: boolean; startAtLogin?: boolean; soundName?: string } = {}): GeneralSettings {
@@ -1132,7 +1241,11 @@ function App() {
         if (windowMode !== 'hud' || !hasBeenInvoked) {
             return;
         }
-        window.requestAnimationFrame(() => {
+        if (aiHUDMeasureFrameRef.current !== null) {
+            window.cancelAnimationFrame(aiHUDMeasureFrameRef.current);
+        }
+        aiHUDMeasureFrameRef.current = window.requestAnimationFrame(() => {
+            aiHUDMeasureFrameRef.current = null;
             const hud = document.querySelector<HTMLElement>('.ai-hud');
             const workspace = document.querySelector<HTMLElement>('.hud-shell .workspace');
             if (!hud || !workspace) {
@@ -1146,8 +1259,11 @@ function App() {
                 aiHUDCollapsedHeight,
                 Math.min(aiHUDMaxHeight, Math.ceil(hud.scrollHeight + verticalPadding + 2)),
             );
-            Window.SetSize(aiHUDWidth, nextHeight);
-            Window.Center();
+            if (nextHeight === aiHUDHeightRef.current) {
+                return;
+            }
+            aiHUDHeightRef.current = nextHeight;
+            ResizeAIPromptWindow(nextHeight).catch((err) => setError(String(err)));
         });
     }
 
@@ -1157,12 +1273,13 @@ function App() {
     }
 
     async function stopAIRequest() {
+        aiRequestGenerationRef.current += 1;
+        aiRequestRunningRef.current = false;
+        setAIRunning(false);
         try {
             await CancelAIRequest();
         } catch (err) {
             setError(String(err));
-        } finally {
-            setAIRunning(false);
         }
     }
 
@@ -1170,11 +1287,70 @@ function App() {
         return new Promise((resolve) => window.setTimeout(resolve, ms));
     }
 
-    async function runAIPrompt() {
-        if (!aiPrompt.trim()) {
+    function aiResponseText() {
+        return aiReplacement || aiResult;
+    }
+
+    async function insertAIResponse() {
+        const response = aiResponseText();
+        const sourceProcessID = aiContext.sourceProcessId;
+        if (
+            !response ||
+            sourceProcessID <= 0 ||
+            aiResponseAction === 'inserting' ||
+            aiInsertionInFlightRef.current
+        ) {
             return;
         }
+        aiInsertionInFlightRef.current = true;
+        setAIResponseAction('inserting');
+        try {
+            await hideCurrentWindow(false);
+            await waits(80);
+            await ReplaceSelectedText(sourceProcessID, response);
+            playCompletionSound();
+        } catch (err) {
+            setAIResponseAction('idle');
+            setError(String(err));
+        } finally {
+            aiInsertionInFlightRef.current = false;
+        }
+    }
+
+    async function copyAIResponse() {
+        const response = aiResponseText();
+        if (!response || aiResponseAction === 'copying') {
+            return;
+        }
+        setAIResponseAction('copying');
+        try {
+            await Clipboard.SetText(response);
+            setAIResponseAction('copied');
+            if (aiResponseActionTimerRef.current !== null) {
+                window.clearTimeout(aiResponseActionTimerRef.current);
+            }
+            aiResponseActionTimerRef.current = window.setTimeout(() => {
+                setAIResponseAction('idle');
+                aiResponseActionTimerRef.current = null;
+            }, 1400);
+        } catch (err) {
+            setAIResponseAction('idle');
+            setError(String(err));
+        }
+    }
+
+    async function runAIPrompt() {
+        const instruction = aiPrompt;
+        if (!instruction.trim() || aiRequestRunningRef.current) {
+            return;
+        }
+        const requestGeneration = aiRequestGenerationRef.current + 1;
+        aiRequestGenerationRef.current = requestGeneration;
+        aiRequestRunningRef.current = true;
+        const requestContext = { ...aiContext };
+        const requestSettings = aiSettings;
         setAIRunning(true);
+        setAIResponseAction('idle');
         setError('');
         setAIResult('');
         setAIReplacement('');
@@ -1182,32 +1358,35 @@ function App() {
             StopSpeaking().catch(() => {});
 
             const result = await RunAIAssist({
-                instruction: aiPrompt,
-                contextKind: (aiContext.kind || 'none') as any,
-                contextText: aiContext.text || '',
+                instruction,
+                contextKind: (requestContext.kind || 'none') as any,
+                contextText: requestContext.text || '',
                 filePath: '',
-                appName: aiContext.appName || '',
-                appBundleId: aiContext.appBundleId || '',
+                appName: requestContext.appName || '',
+                appBundleId: requestContext.appBundleId || '',
                 customPrompt: '',
             });
+            if (requestGeneration !== aiRequestGenerationRef.current) {
+                return;
+            }
             const isEdit = result.intent === 'edit' && !!result.replacement;
             if (
-                aiSettings?.replaceSelectedText &&
-                aiContext.sourceProcessId > 0 &&
+                requestSettings?.replaceSelectedText &&
+                requestContext.sourceProcessId > 0 &&
                 isEdit
             ) {
-                const preferPasteReplacement = !!aiContext.appBundleId &&
-                    (aiSettings.pasteReplacementBundleIds || []).includes(aiContext.appBundleId);
+                const preferPasteReplacement = !!requestContext.appBundleId &&
+                    (requestSettings.pasteReplacementBundleIds || []).includes(requestContext.appBundleId);
                 if (preferPasteReplacement) {
                     await hideCurrentWindow(false);
-                    await ActivateProcess(aiContext.sourceProcessId);
+                    await ActivateProcess(requestContext.sourceProcessId);
                     await waits(180);
                 }
-                await ReplaceSelectedText(aiContext.sourceProcessId, result.replacement);
+                await ReplaceSelectedText(requestContext.sourceProcessId, result.replacement);
                 playCompletionSound();
                 if (!preferPasteReplacement) {
                     await hideCurrentWindow(false);
-                    await ActivateProcess(aiContext.sourceProcessId);
+                    await ActivateProcess(requestContext.sourceProcessId);
                 }
                 return;
             }
@@ -1217,16 +1396,21 @@ function App() {
 
             // Speak if enabled
             // @ts-ignore
-            if (aiSettings?.ttsEnabled && aiSettings?.ttsUseAiResponse) {
+            if (requestSettings?.ttsEnabled && requestSettings?.ttsUseAiResponse) {
                 const textToSpeak = isEdit ? result.replacement : (result.supportReport || '');
                 if (textToSpeak) {
                     Speak(textToSpeak).catch(() => {});
                 }
             }
         } catch (err) {
-            setError(String(err));
+            if (requestGeneration === aiRequestGenerationRef.current) {
+                setError(String(err));
+            }
         } finally {
-            setAIRunning(false);
+            if (requestGeneration === aiRequestGenerationRef.current) {
+                aiRequestRunningRef.current = false;
+                setAIRunning(false);
+            }
         }
     }
 
@@ -1291,6 +1475,10 @@ function App() {
         setRecordingTtsHotkey(false);
     }
 
+    const aiHUDPromptHint = aiContext.kind === 'selected_text'
+        ? t('aiHudSelectedPlaceholder', { count: aiContext.text.length })
+        : t('aiHudPlaceholder');
+
     return (
         <div className={`app-shell ${windowMode === 'hud' ? 'hud-shell' : ''}`}>
             {windowMode === 'main' && <aside className="sidebar">
@@ -1341,16 +1529,33 @@ function App() {
             <main className="workspace">
                 {windowMode === 'hud' ? (
                     <section className="ai-hud">
-                        <div className="hud-header">
-                            <div className="hud-title">
-                                <span className="hud-title-icon material-symbols-rounded" aria-hidden="true">auto_awesome</span>
-                                <div>
-                                    <h1>{t('aiAssist')}</h1>
-                                    <p>{aiContext.kind === 'selected_text' ? t('charactersSelected', { count: aiContext.text.length }) : t('noSelectedText')}</p>
-                                </div>
-                            </div>
+                        <form
+                            className={`ai-prompt-form hud-prompt-form ${aiRunning ? 'is-running' : ''} ${aiPrompt ? 'has-value' : ''}`}
+                            data-hint={aiHUDPromptHint}
+                            onSubmit={submitAIPrompt}
+                        >
+                            <textarea
+                                ref={aiPromptRef}
+                                value={aiPrompt}
+                                onChange={(event) => updateAIPrompt(event.target.value)}
+                                onKeyDown={handleAIPromptKeyDown}
+                                aria-label={aiHUDPromptHint}
+                                rows={1}
+                            />
                             <button
-                                className="hud-close-button"
+                                className="hud-inline-send"
+                                type={aiRunning ? 'button' : 'submit'}
+                                disabled={!aiRunning && !aiPrompt.trim()}
+                                onClick={aiRunning ? stopAIRequest : undefined}
+                                aria-label={aiRunning ? t('stop') : t('send')}
+                                title={aiRunning ? t('stop') : t('send')}
+                            >
+                                <span className="material-symbols-rounded" aria-hidden="true">
+                                    {aiRunning ? 'stop_circle' : 'arrow_circle_right'}
+                                </span>
+                            </button>
+                            <button
+                                className="hud-inline-close"
                                 type="button"
                                 onClick={() => hideCurrentWindow()}
                                 aria-label={t('close')}
@@ -1358,33 +1563,36 @@ function App() {
                             >
                                 <span className="material-symbols-rounded" aria-hidden="true">close</span>
                             </button>
-                        </div>
-                        <form className="ai-prompt-form hud-prompt-form" onSubmit={submitAIPrompt}>
-                            <textarea
-                                ref={aiPromptRef}
-                                value={aiPrompt}
-                                onChange={(event) => updateAIPrompt(event.target.value)}
-                                onKeyDown={handleAIPromptKeyDown}
-                                placeholder={aiContext.kind === 'selected_text' ? t('aiHudSelectedPlaceholder') : t('aiHudPlaceholder')}
-                                rows={1}
-                            />
-                            <div className="prompt-actions">
-                                <button
-                                    className="primary-button"
-                                    type={aiRunning ? 'button' : 'submit'}
-                                    disabled={!aiRunning && !aiPrompt.trim()}
-                                    onClick={aiRunning ? stopAIRequest : undefined}
-                                >
-                                    {aiRunning && <span className="button-spinner" />}
-                                    {aiRunning ? t('stop') : t('send')}
-                                </button>
-                            </div>
                         </form>
                         {aiRunning && <AIProgressStatus elapsedMs={aiElapsedMs} t={t} />}
                         {(aiResult || aiReplacement) && (
                             <div className="ai-result hud-result">
-                                {aiResult && <p>{aiResult}</p>}
-                                {aiReplacement && <pre>{aiReplacement}</pre>}
+                                <div className="hud-result-content">
+                                    {aiResult && <p>{aiResult}</p>}
+                                    {aiReplacement && <pre>{aiReplacement}</pre>}
+                                </div>
+                                <div className="hud-result-actions" role="group" aria-label={t('responseActions')}>
+                                    <button
+                                        type="button"
+                                        onClick={insertAIResponse}
+                                        disabled={aiContext.sourceProcessId <= 0 || aiResponseAction === 'inserting'}
+                                        title={t('insertResponse')}
+                                    >
+                                        <span className="material-symbols-rounded" aria-hidden="true">input</span>
+                                        <span>{t('insert')}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={copyAIResponse}
+                                        disabled={aiResponseAction === 'copying'}
+                                        title={t('copyResponse')}
+                                    >
+                                        <span className="material-symbols-rounded" aria-hidden="true">
+                                            {aiResponseAction === 'copied' ? 'check' : 'content_copy'}
+                                        </span>
+                                        <span>{aiResponseAction === 'copied' ? t('copied') : t('copy')}</span>
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </section>
@@ -1895,6 +2103,7 @@ function App() {
                                             >
                                                 <option value="openai">{t('openaiCompatible')}</option>
                                                 <option value="lmstudio">{t('lmStudioCompatible')}</option>
+                                                <option value="apple_intelligence">{t('appleIntelligence')}</option>
                                             </select>
                                         </label>
                                         <label>
@@ -1913,46 +2122,67 @@ function App() {
                                             </button>
                                         </label>
                                     </div>
-                                    <div className="settings-form-grid">
-                                        <label>
-                                            {t('endpointOrHostPort')}
-                                            <input
-                                                value={aiSettings.endpoint}
-                                                onChange={(event) => setAISettings({ ...aiSettings, endpoint: event.target.value })}
-                                                placeholder="http://localhost:1234"
-                                            />
-                                        </label>
-                                        <label>
-                                            {t('model')}
-                                            <input
-                                                value={aiSettings.model}
-                                                onChange={(event) => setAISettings({ ...aiSettings, model: event.target.value })}
-                                                placeholder={t('modelPlaceholder')}
-                                            />
-                                        </label>
-                                    </div>
-                                    <div className="settings-form-grid">
-                                        <label>
-                                            {t('apiKey')}
-                                            <input
-                                                value={aiSettings.apiKey}
-                                                onChange={(event) => setAISettings({ ...aiSettings, apiKey: event.target.value })}
-                                                placeholder={t('optional')}
-                                                type="password"
-                                            />
-                                        </label>
-                                        <label>
-                                            {t('temperature')}
-                                            <input
-                                                value={aiSettings.temperature}
-                                                min={0}
-                                                max={2}
-                                                step={0.1}
-                                                type="number"
-                                                onChange={(event) => setAISettings({ ...aiSettings, temperature: Number(event.target.value) })}
-                                            />
-                                        </label>
-                                    </div>
+                                    {aiSettings.provider === 'apple_intelligence' ? (
+                                        <div className={`apple-intelligence-status-card ${appleIntelligenceStatus.available ? 'available' : ''}`}>
+                                            <span className="material-symbols-rounded" aria-hidden="true">auto_awesome</span>
+                                            <div>
+                                                <strong>{t('appleIntelligenceOnDevice')}</strong>
+                                                <span>{t('appleIntelligenceDescription')}</span>
+                                            </div>
+                                            <span
+                                                className="apple-intelligence-state"
+                                                title={appleIntelligenceStatus.detail || undefined}
+                                            >
+                                                {appleIntelligenceStatusLabel(appleIntelligenceStatus, t)}
+                                            </span>
+                                            <button type="button" onClick={refreshAppleIntelligenceStatus}>
+                                                {t('refresh')}
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="settings-form-grid">
+                                                <label>
+                                                    {t('endpointOrHostPort')}
+                                                    <input
+                                                        value={aiSettings.endpoint}
+                                                        onChange={(event) => setAISettings({ ...aiSettings, endpoint: event.target.value })}
+                                                        placeholder="http://localhost:1234"
+                                                    />
+                                                </label>
+                                                <label>
+                                                    {t('model')}
+                                                    <input
+                                                        value={aiSettings.model}
+                                                        onChange={(event) => setAISettings({ ...aiSettings, model: event.target.value })}
+                                                        placeholder={t('modelPlaceholder')}
+                                                    />
+                                                </label>
+                                            </div>
+                                            <div className="settings-form-grid">
+                                                <label>
+                                                    {t('apiKey')}
+                                                    <input
+                                                        value={aiSettings.apiKey}
+                                                        onChange={(event) => setAISettings({ ...aiSettings, apiKey: event.target.value })}
+                                                        placeholder={t('optional')}
+                                                        type="password"
+                                                    />
+                                                </label>
+                                                <label>
+                                                    {t('temperature')}
+                                                    <input
+                                                        value={aiSettings.temperature}
+                                                        min={0}
+                                                        max={2}
+                                                        step={0.1}
+                                                        type="number"
+                                                        onChange={(event) => setAISettings({ ...aiSettings, temperature: Number(event.target.value) })}
+                                                    />
+                                                </label>
+                                            </div>
+                                        </>
+                                    )}
                                     <label className="wide-setting">
                                         {t('pasteReplacementBundleIds')}
                                         <div className="bundle-list-control">

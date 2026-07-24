@@ -84,6 +84,10 @@ export function GetAISettings(): $CancellablePromise<ai$0.Settings> {
     return $Call.ByID(84577668);
 }
 
+export function GetAppleIntelligenceStatus(): $CancellablePromise<ai$0.AppleIntelligenceStatus> {
+    return $Call.ByID(489704876);
+}
+
 export function GetDashboard(): $CancellablePromise<storage$0.DashboardStats> {
     return $Call.ByID(164996217);
 }
@@ -126,6 +130,13 @@ export function ReplaceSelectedText(processID: number, replacement: string): $Ca
 
 export function RequestAccessibilityPermission(): $CancellablePromise<platform$0.Status> {
     return $Call.ByID(1098525461);
+}
+
+/**
+ * ResizeAIPromptWindow smoothly resizes the AI prompt while keeping its top edge fixed.
+ */
+export function ResizeAIPromptWindow(height: number): $CancellablePromise<void> {
+    return $Call.ByID(3094965729, height);
 }
 
 export function RunAIAssist(input: ai$0.AssistRequest): $CancellablePromise<ai$0.AssistResult> {

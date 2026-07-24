@@ -79,23 +79,25 @@ type AIPromptProfileInput struct {
 
 // App struct
 type App struct {
-	ctx                   context.Context
-	store                 *storage.Store
-	aiClient              *ai.Client
-	expansionSoundEvents  chan struct{}
-	expansionSoundStopper context.CancelFunc
-	ttsCmd                *exec.Cmd
-	ttsMu                 sync.Mutex
-	systray               *application.SystemTray
-	supertonicEngine      *ai.SupertonicEngine
-	supertonicEngineMu    sync.Mutex
+	ctx                     context.Context
+	store                   *storage.Store
+	aiClient                *ai.Client
+	appleIntelligenceClient ai.AppleIntelligenceClient
+	expansionSoundEvents    chan struct{}
+	expansionSoundStopper   context.CancelFunc
+	ttsCmd                  *exec.Cmd
+	ttsMu                   sync.Mutex
+	systray                 *application.SystemTray
+	supertonicEngine        *ai.SupertonicEngine
+	supertonicEngineMu      sync.Mutex
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
-		aiClient:             ai.NewClient(),
-		expansionSoundEvents: make(chan struct{}, 8),
+		aiClient:                ai.NewClient(),
+		appleIntelligenceClient: ai.NewAppleIntelligenceClient(),
+		expansionSoundEvents:    make(chan struct{}, 8),
 	}
 }
 
@@ -124,6 +126,12 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 
 func (a *App) ServiceShutdown() error {
 	appInst := application.Get()
+	if a.aiClient != nil {
+		a.aiClient.Cancel()
+	}
+	if a.appleIntelligenceClient != nil {
+		a.appleIntelligenceClient.Cancel()
+	}
 	a.destroySystemTray()
 	if appInst.GlobalShortcut != nil {
 		_ = appInst.GlobalShortcut.UnregisterAll()
@@ -509,7 +517,20 @@ func (a *App) RunAIAssist(input ai.AssistRequest) (ai.AssistResult, error) {
 		a.aiClient = ai.NewClient()
 	}
 	input.CustomPrompt = a.customPromptForRequest(input)
+	if settings.Provider == ai.ProviderAppleIntelligence {
+		if a.appleIntelligenceClient == nil {
+			a.appleIntelligenceClient = ai.NewAppleIntelligenceClient()
+		}
+		return ai.RunAppleIntelligenceAssist(a.appleIntelligenceClient, settings, input)
+	}
 	return ai.RunAssist(a.aiClient, settings, input)
+}
+
+func (a *App) GetAppleIntelligenceStatus() ai.AppleIntelligenceStatus {
+	if a.appleIntelligenceClient == nil {
+		a.appleIntelligenceClient = ai.NewAppleIntelligenceClient()
+	}
+	return a.appleIntelligenceClient.Status()
 }
 
 func (a *App) ReplaceSelectedText(processID int, replacement string) error {
@@ -539,6 +560,9 @@ func (a *App) ActivateProcess(processID int) error {
 func (a *App) CancelAIRequest() {
 	if a.aiClient != nil {
 		a.aiClient.Cancel()
+	}
+	if a.appleIntelligenceClient != nil {
+		a.appleIntelligenceClient.Cancel()
 	}
 }
 
@@ -656,8 +680,8 @@ func (a *App) showAIPrompt(sourceProcessID int, requireEnabled bool) {
 	appInst := application.Get()
 	if aiWin, ok := appInst.Window.GetByName("ai"); ok {
 		application.InvokeSync(func() {
-			aiWin.SetMinSize(460, 112)
-			aiWin.SetSize(460, 112)
+			aiWin.SetMinSize(460, 74)
+			aiWin.SetSize(460, 74)
 			aiWin.Center()
 			aiWin.SetAlwaysOnTop(true)
 			aiWin.UnMinimise()
@@ -665,6 +689,23 @@ func (a *App) showAIPrompt(sourceProcessID int, requireEnabled bool) {
 			aiWin.Focus()
 		})
 		appInst.Event.Emit("ai:invoke", invocation)
+	}
+}
+
+// ResizeAIPromptWindow smoothly resizes the AI prompt while keeping its top edge fixed.
+func (a *App) ResizeAIPromptWindow(height int) {
+	const (
+		width     = 460
+		minHeight = 74
+		maxHeight = 420
+	)
+	height = max(minHeight, min(maxHeight, height))
+
+	appInst := application.Get()
+	if aiWin, ok := appInst.Window.GetByName("ai"); ok {
+		application.InvokeSync(func() {
+			resizeWindowFromTop(aiWin, width, height)
+		})
 	}
 }
 

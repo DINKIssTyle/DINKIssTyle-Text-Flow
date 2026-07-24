@@ -300,85 +300,105 @@ button:not(:disabled):focus-visible {
     gap: 9px;
 }
 
-.hud-header {
-    display: flex;
+.hud-prompt-form {
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
-    justify-content: space-between;
-    gap: 10px;
+    gap: 5px;
+    min-height: 52px;
+    padding: 0 4px 0 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    box-sizing: border-box;
 }
 
-.hud-title {
-    display: flex;
+.hud-prompt-form::before {
+    content: attr(data-hint);
+    z-index: 1;
+    grid-column: 1;
+    grid-row: 1;
     min-width: 0;
-    align-items: center;
-    gap: 9px;
+    overflow: hidden;
+    padding: 0 12px;
+    color: color-mix(in srgb, var(--muted) 74%, transparent);
+    font-size: 13px;
+    line-height: 20px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    pointer-events: none;
 }
 
-.hud-title-icon {
+.hud-prompt-form.has-value::before {
+    content: none;
+}
+
+.ai-prompt-form.hud-prompt-form textarea {
+    position: relative;
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 40px;
+    padding: 9px 12px;
+    border: 1px solid var(--control-border);
+    border-radius: 11px;
+    background: var(--panel-bg);
+    outline: none;
+    transition:
+        border-color 0.16s ease,
+        box-shadow 0.16s ease;
+}
+
+.ai-prompt-form.hud-prompt-form textarea:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.hud-prompt-form button {
     display: inline-flex;
     flex: 0 0 auto;
-    width: 28px;
-    height: 28px;
-    align-items: center;
-    justify-content: center;
-    border-radius: 9px;
-    background: var(--active-bg);
-    color: var(--primary);
-    font-size: 17px;
-    font-variation-settings: "FILL" 1, "wght" 500;
-}
-
-.hud-header h1 {
-    font-size: 14px;
-    line-height: 17px;
-}
-
-.hud-header p {
-    color: var(--muted);
-    font-size: 11px;
-    line-height: 14px;
-}
-
-.hud-header .hud-close-button {
-    display: inline-flex;
-    flex: 0 0 auto;
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
     padding: 0;
     align-items: center;
     justify-content: center;
+    border: 0;
     border-radius: 999px;
-    background: var(--subtle-bg);
+    background: transparent;
+    box-shadow: none;
+}
+
+.hud-prompt-form button:not(:disabled):hover {
+    border: 0;
+    background: var(--active-bg);
+    box-shadow: none;
+}
+
+.hud-prompt-form button:disabled {
+    cursor: default;
+    opacity: 0.38;
+}
+
+.hud-prompt-form .hud-inline-send {
+    color: var(--primary);
+}
+
+.hud-prompt-form.is-running .hud-inline-send {
+    color: var(--danger);
+}
+
+.hud-prompt-form .hud-inline-close {
     color: var(--muted);
 }
 
-.hud-close-button .material-symbols-rounded {
-    font-size: 18px;
+.hud-prompt-form button .material-symbols-rounded {
+    font-size: 22px;
     font-variation-settings: "wght" 500;
-}
-
-.hud-prompt-form {
-    grid-template-columns: 1fr auto;
-    align-items: center;
-    gap: 7px;
-}
-
-.hud-prompt-form textarea {
-    min-height: 40px;
-    padding: 9px 12px;
-    border-radius: 11px;
-    background: var(--panel-bg);
-}
-
-.hud-prompt-form .prompt-actions button {
-    min-width: 62px;
-    height: 40px;
-    border-radius: 11px;
 }
 
 .hud-result {
     max-height: 220px;
-    overflow: auto;
+    grid-template-rows: minmax(0, 1fr) auto;
+    overflow: hidden;
     margin-top: 0;
     padding: 11px 12px;
     border-radius: 10px;
@@ -387,7 +407,58 @@ button:not(:disabled):focus-visible {
     animation: hud-content-in 0.18s ease-out;
 }
 
-.hud-result p {
+.hud-result-content {
+    min-height: 0;
+    overflow: auto;
+}
+
+.hud-result-actions {
+    display: flex;
+    width: max-content;
+    margin: 0 -4px -4px auto;
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
+}
+
+.hud-result-actions button {
+    display: inline-flex;
+    height: 24px;
+    padding: 0 7px;
+    align-items: center;
+    gap: 3px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 600;
+}
+
+.hud-result-actions button + button {
+    border-left: 1px solid var(--border);
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+.hud-result-actions button:not(:disabled):hover {
+    background: var(--active-bg);
+    color: var(--primary);
+    box-shadow: none;
+}
+
+.hud-result-actions button:disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+.hud-result-actions .material-symbols-rounded {
+    font-size: 14px;
+    font-variation-settings: "wght" 500;
+}
+
+.hud-result-content p {
     white-space: pre-wrap;
 }
 
@@ -1643,6 +1714,62 @@ h2 {
 
 .settings-form-grid .hotkey-capture {
     min-width: 0;
+}
+
+.apple-intelligence-status-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 50px;
+    padding: 8px 10px;
+    border: 1px solid var(--control-border);
+    border-radius: 9px;
+    background: var(--subtle-bg);
+}
+
+.apple-intelligence-status-card>.material-symbols-rounded {
+    display: inline-flex;
+    width: 30px;
+    height: 30px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9px;
+    background: var(--active-bg);
+    color: var(--primary);
+    font-size: 18px;
+    font-variation-settings: "FILL" 1, "wght" 500;
+}
+
+.apple-intelligence-status-card>div {
+    display: grid;
+    gap: 2px;
+}
+
+.apple-intelligence-status-card strong {
+    color: var(--text);
+    font-size: 13px;
+}
+
+.apple-intelligence-status-card span {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.apple-intelligence-status-card .apple-intelligence-state {
+    color: var(--danger);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: right;
+}
+
+.apple-intelligence-status-card.available .apple-intelligence-state {
+    color: var(--good);
+}
+
+.apple-intelligence-status-card button {
+    height: 28px;
+    padding: 0 9px;
 }
 
 .wide-setting {

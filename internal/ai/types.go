@@ -3,8 +3,9 @@ package ai
 import "strings"
 
 const (
-	ProviderOpenAI   = "openai"
-	ProviderLMStudio = "lmstudio"
+	ProviderOpenAI            = "openai"
+	ProviderLMStudio          = "lmstudio"
+	ProviderAppleIntelligence = "apple_intelligence"
 
 	DefaultEndpoint    = "http://localhost:1234"
 	DefaultTemperature = 0.0
@@ -111,7 +112,9 @@ func NormalizeSettings(settings Settings) Settings {
 	if settings.Provider == "" {
 		settings.Provider = defaults.Provider
 	}
-	if settings.Provider != ProviderOpenAI && settings.Provider != ProviderLMStudio {
+	if settings.Provider != ProviderOpenAI &&
+		settings.Provider != ProviderLMStudio &&
+		settings.Provider != ProviderAppleIntelligence {
 		settings.Provider = ProviderOpenAI
 	}
 

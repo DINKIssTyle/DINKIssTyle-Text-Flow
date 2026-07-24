@@ -37,6 +37,7 @@ tasks:
           DEV:
             ref: .DEV
       - task: common:generate:icons
+      - task: build:apple-intelligence-helper
     preconditions:
       - sh: '{{if eq .OBFUSCATED "true"}}command -v garble >/dev/null 2>&1{{else}}true{{end}}'
         msg: "garble is required for obfuscated builds. Install it with: go install mvdan.cc/garble@v0.16.0 (requires Go 1.24+). See https://github.com/burrowers/garble/releases for version/toolchain compatibility."
@@ -53,6 +54,35 @@ tasks:
       CGO_CFLAGS: "-mmacosx-version-min=12.0"
       CGO_LDFLAGS: "-mmacosx-version-min=12.0"
       MACOSX_DEPLOYMENT_TARGET: "12.0"
+
+  build:apple-intelligence-helper:
+    summary: Builds the bundled Apple Intelligence Swift helper
+    internal: true
+    run: once
+    sources:
+      - build/darwin/apple_intelligence_helper.swift
+    generates:
+      - "{{.BIN_DIR}}/DKSTAppleIntelligenceHelper"
+    cmds:
+      - mkdir -p "{{.BIN_DIR}}"
+      - |
+        HELPER_TMP_DIR="$(mktemp -d)"
+        trap 'rm -rf "$HELPER_TMP_DIR"' EXIT
+        xcrun swiftc -parse-as-library -O \
+          -target arm64-apple-macosx12.0 \
+          build/darwin/apple_intelligence_helper.swift \
+          -o "$HELPER_TMP_DIR/DKSTAppleIntelligenceHelper-arm64"
+        xcrun swiftc -parse-as-library -O \
+          -target x86_64-apple-macosx12.0 \
+          build/darwin/apple_intelligence_helper.swift \
+          -o "$HELPER_TMP_DIR/DKSTAppleIntelligenceHelper-x86_64"
+        lipo -create \
+          -output "{{.ROOT_DIR}}/{{.BIN_DIR}}/DKSTAppleIntelligenceHelper" \
+          "$HELPER_TMP_DIR/DKSTAppleIntelligenceHelper-arm64" \
+          "$HELPER_TMP_DIR/DKSTAppleIntelligenceHelper-x86_64"
+    env:
+      CLANG_MODULE_CACHE_PATH: "/tmp/dkst-clang-module-cache"
+      SWIFTPM_MODULECACHE_OVERRIDE: "/tmp/dkst-swift-module-cache"
 
   build:docker:
     summary: Cross-compiles for macOS using Docker (for Linux/Windows hosts)
@@ -135,6 +165,10 @@ tasks:
       - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources"
       - cp build/darwin/icons.icns "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources"
       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
+      - |
+        if [ -f "{{.BIN_DIR}}/DKSTAppleIntelligenceHelper" ]; then
+          cp "{{.BIN_DIR}}/DKSTAppleIntelligenceHelper" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
+        fi
       - cp build/darwin/Info.plist "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents"
       - task: '{{if eq OS "darwin"}}codesign:adhoc{{else}}codesign:skip{{end}}'
 
@@ -160,6 +194,10 @@ tasks:
           cp build/darwin/Assets.car "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/Resources"
         fi
       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS"
+      - |
+        if [ -f "{{.BIN_DIR}}/DKSTAppleIntelligenceHelper" ]; then
+          cp "{{.BIN_DIR}}/DKSTAppleIntelligenceHelper" "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS"
+        fi
       - cp "build/darwin/Info.dev.plist" "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/Info.plist"
       - codesign --force --deep --sign - "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app"
       - '"{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS/{{.APP_NAME}}"'

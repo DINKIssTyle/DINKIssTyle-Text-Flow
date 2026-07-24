@@ -50,6 +50,17 @@ static int DKSTFrontmostPID(void) {
     return (int)[app processIdentifier];
 }
 
+static int DKSTWaitForFrontmostPID(pid_t pid, int timeoutMilliseconds) {
+    int attempts = timeoutMilliseconds / 20;
+    for (int i = 0; i < attempts; i++) {
+        if (DKSTFrontmostPID() == pid) {
+            return 1;
+        }
+        usleep(20000);
+    }
+    return DKSTFrontmostPID() == pid ? 1 : 0;
+}
+
 static int DKSTActivatePID(pid_t pid) {
     if (pid <= 0 || pid == getpid()) {
         return 0;
@@ -514,17 +525,22 @@ static int DKSTReplaceSelectedTextForPID(pid_t pid, const char *replacement, int
         NSString *text = [NSString stringWithUTF8String:replacement] ?: @"";
         [pasteboard clearContents];
         [pasteboard setString:text forType:NSPasteboardTypeString];
+        NSInteger replacementChangeCount = [pasteboard changeCount];
 
         DKSTActivatePID(pid);
-        usleep(preferPaste == 1 ? 160000 : 80000);
+        DKSTWaitForFrontmostPID(pid, preferPaste == 1 ? 900 : 650);
         DKSTWaitForModifierKeysUp();
         DKSTPostModifierKeyUpsToPID(pid);
         usleep(80000);
         DKSTPostPasteShortcutToPID(pid);
-        usleep(preferPaste == 1 ? 650000 : 250000);
+        usleep(preferPaste == 1 ? 1000000 : 750000);
         DKSTPostModifierKeyUpsToPID(pid);
 
-        DKSTRestorePasteboard(pasteboard, oldItems);
+        // A slow target must read the replacement before the previous clipboard is restored.
+        // If the user copied something meanwhile, preserve their newer clipboard instead.
+        if ([pasteboard changeCount] == replacementChangeCount) {
+            DKSTRestorePasteboard(pasteboard, oldItems);
+        }
         [oldItems release];
         didPaste = 1;
     };
