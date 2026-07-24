@@ -371,6 +371,7 @@ function App() {
     const [aiRunning, setAIRunning] = useState(false);
     const [aiElapsedMs, setAIElapsedMs] = useState(0);
     const [aiResponseAction, setAIResponseAction] = useState<'idle' | 'copying' | 'copied' | 'inserting'>('idle');
+    const [aiTTSSynthesizing, setAITTSSynthesizing] = useState(false);
     const [recordingHotkey, setRecordingHotkey] = useState(false);
     const [recordingTtsHotkey, setRecordingTtsHotkey] = useState(false);
     const [hasBeenInvoked, setHasBeenInvoked] = useState(false);
@@ -391,6 +392,7 @@ function App() {
     const aiRequestGenerationRef = useRef(0);
     const aiRequestRunningRef = useRef(false);
     const aiInsertionInFlightRef = useRef(false);
+    const aiTTSGenerationRef = useRef(0);
     const snippetContentRef = useRef<HTMLTextAreaElement | null>(null);
     const shortcutInputRef = useRef<HTMLInputElement | null>(null);
     const soundNameRef = useRef(noSoundName);
@@ -883,6 +885,7 @@ function App() {
     function resetAIHUDContent() {
         aiRequestGenerationRef.current += 1;
         aiRequestRunningRef.current = false;
+        aiTTSGenerationRef.current += 1;
         if (aiHUDMeasureFrameRef.current !== null) {
             window.cancelAnimationFrame(aiHUDMeasureFrameRef.current);
             aiHUDMeasureFrameRef.current = null;
@@ -897,6 +900,7 @@ function App() {
         setAIReplacement('');
         setAIElapsedMs(0);
         setAIResponseAction('idle');
+        setAITTSSynthesizing(false);
         setAIRunning(false);
         setAIContext({
             kind: 'none',
@@ -1351,6 +1355,8 @@ function App() {
         const requestSettings = aiSettings;
         setAIRunning(true);
         setAIResponseAction('idle');
+        aiTTSGenerationRef.current += 1;
+        setAITTSSynthesizing(false);
         setError('');
         setAIResult('');
         setAIReplacement('');
@@ -1372,6 +1378,8 @@ function App() {
             const isEdit = result.intent === 'edit' && !!result.replacement;
             if (
                 requestSettings?.replaceSelectedText &&
+                requestContext.kind === 'selected_text' &&
+                !!requestContext.text.trim() &&
                 requestContext.sourceProcessId > 0 &&
                 isEdit
             ) {
@@ -1399,7 +1407,20 @@ function App() {
             if (requestSettings?.ttsEnabled && requestSettings?.ttsUseAiResponse) {
                 const textToSpeak = isEdit ? result.replacement : (result.supportReport || '');
                 if (textToSpeak) {
-                    Speak(textToSpeak).catch(() => {});
+                    const ttsGeneration = aiTTSGenerationRef.current + 1;
+                    aiTTSGenerationRef.current = ttsGeneration;
+                    setAITTSSynthesizing(true);
+                    Speak(textToSpeak)
+                        .catch((err) => {
+                            if (ttsGeneration === aiTTSGenerationRef.current) {
+                                setError(String(err));
+                            }
+                        })
+                        .finally(() => {
+                            if (ttsGeneration === aiTTSGenerationRef.current) {
+                                setAITTSSynthesizing(false);
+                            }
+                        });
                 }
             }
         } catch (err) {
@@ -1571,27 +1592,35 @@ function App() {
                                     {aiResult && <p>{aiResult}</p>}
                                     {aiReplacement && <pre>{aiReplacement}</pre>}
                                 </div>
-                                <div className="hud-result-actions" role="group" aria-label={t('responseActions')}>
-                                    <button
-                                        type="button"
-                                        onClick={insertAIResponse}
-                                        disabled={aiContext.sourceProcessId <= 0 || aiResponseAction === 'inserting'}
-                                        title={t('insertResponse')}
-                                    >
-                                        <span className="material-symbols-rounded" aria-hidden="true">input</span>
-                                        <span>{t('insert')}</span>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={copyAIResponse}
-                                        disabled={aiResponseAction === 'copying'}
-                                        title={t('copyResponse')}
-                                    >
-                                        <span className="material-symbols-rounded" aria-hidden="true">
-                                            {aiResponseAction === 'copied' ? 'check' : 'content_copy'}
-                                        </span>
-                                        <span>{aiResponseAction === 'copied' ? t('copied') : t('copy')}</span>
-                                    </button>
+                                <div className="hud-result-footer">
+                                    {aiTTSSynthesizing && (
+                                        <div className="hud-tts-status" role="status" aria-live="polite">
+                                            <span className="hud-tts-spinner" aria-hidden="true" />
+                                            <span>{t('ttsSynthesizing')}</span>
+                                        </div>
+                                    )}
+                                    <div className="hud-result-actions" role="group" aria-label={t('responseActions')}>
+                                        <button
+                                            type="button"
+                                            onClick={insertAIResponse}
+                                            disabled={aiContext.sourceProcessId <= 0 || aiResponseAction === 'inserting'}
+                                            title={t('insertResponse')}
+                                        >
+                                            <span className="material-symbols-rounded" aria-hidden="true">input</span>
+                                            <span>{t('insert')}</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={copyAIResponse}
+                                            disabled={aiResponseAction === 'copying'}
+                                            title={t('copyResponse')}
+                                        >
+                                            <span className="material-symbols-rounded" aria-hidden="true">
+                                                {aiResponseAction === 'copied' ? 'check' : 'content_copy'}
+                                            </span>
+                                            <span>{aiResponseAction === 'copied' ? t('copied') : t('copy')}</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         )}

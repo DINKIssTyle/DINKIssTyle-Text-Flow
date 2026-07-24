@@ -1,0 +1,41 @@
+{
+  "buildDiskImage" : true,
+  "buildInstaller" : false,
+  "buildZipArchive" : false,
+  "diskImage" : {
+    "appIconX" : 313,
+    "appIconY" : 104,
+    "applicationsIconX" : 313,
+    "applicationsIconY" : 312,
+    "centerAppIcon" : false,
+    "iconSize" : 96,
+    "includeApplicationsLink" : true,
+    "includeInstallerPackage" : false,
+    "layoutTemplate" : "template2",
+    "volumeName" : "DKST Text Flow Alpha",
+    "windowHeight" : 447,
+    "windowWidth" : 620
+  },
+  "formatVersion" : 3,
+  "installer" : {
+    "backgroundAlignment" : "center",
+    "backgroundScaling" : "proportional",
+    "conclusionAction" : "none",
+    "conclusionText" : "DKST Text Flow was installed successfully.",
+    "identifier" : "com.dinkisstyle.textflow.installer",
+    "installLocation" : "\/Applications",
+    "installationDomain" : "localSystem",
+    "licenseText" : "",
+    "readMeText" : "",
+    "showConclusion" : true,
+    "showLicense" : false,
+    "showReadMe" : false,
+    "showWelcome" : true,
+    "title" : "DKST Text Flow",
+    "version" : "1.0.0",
+    "welcomeText" : "Welcome to the DKST Text Flow installer."
+  },
+  "installerIdentity" : "",
+  "signInstaller" : false,
+  "targetRelativePath" : "Documents\/GitHub\/DINKIssTyle-Text-Flow-macOS\/bin\/DKST Text Flow.app"
+}

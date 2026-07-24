@@ -9,7 +9,37 @@ vars:
 
 tasks:
   build:
-    summary: Builds the application
+    summary: Builds the application as a final `.app` bundle
+    cmds:
+      # Wails dev needs the loose executable for the run task. Production
+      # builds are packaged immediately so bin contains only the final app.
+      - task: '{{if eq .DEV "true"}}build:binary{{else}}build:app{{end}}'
+        vars:
+          ARCH: '{{.ARCH}}'
+          DEV: '{{.DEV}}'
+          EXTRA_TAGS: '{{.EXTRA_TAGS}}'
+          OBFUSCATED: '{{.OBFUSCATED}}'
+          GARBLE_ARGS: '{{.GARBLE_ARGS}}'
+
+  build:app:
+    summary: Builds and packages the final macOS app bundle
+    internal: true
+    cmds:
+      - task: prepare:production-build
+      - task: build:binary
+        vars:
+          ARCH: '{{.ARCH}}'
+          DEV: 'false'
+          OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
+          EXTRA_TAGS: '{{.EXTRA_TAGS}}'
+          OBFUSCATED: '{{.OBFUSCATED}}'
+          GARBLE_ARGS: '{{.GARBLE_ARGS}}'
+      - task: create:app:bundle
+      - task: cleanup:production-artifacts
+
+  build:binary:
+    summary: Builds the loose executable used for staging or development
+    internal: true
     cmds:
       - task: '{{if eq OS "darwin"}}build:native{{else}}build:docker{{end}}'
         vars:
@@ -116,18 +146,26 @@ tasks:
         sh: 'wails3 tool docker-mounts'
 
   build:universal:
-    summary: Builds darwin universal binary (arm64 + amd64)
+    summary: Builds the final universal macOS app bundle (arm64 + amd64)
+    cmds:
+      - task: prepare:production-build
+      - task: build:universal:binaries
+      - task: '{{if eq OS "darwin"}}build:universal:lipo:native{{else}}build:universal:lipo:go{{end}}'
+      - task: create:app:bundle
+      - task: cleanup:production-artifacts
+
+  build:universal:binaries:
+    summary: Builds both architecture-specific staging binaries
+    internal: true
     deps:
-      - task: build
+      - task: build:binary
         vars:
           ARCH: amd64
           OUTPUT: "{{.BIN_DIR}}/{{.APP_NAME}}-amd64"
-      - task: build
+      - task: build:binary
         vars:
           ARCH: arm64
           OUTPUT: "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"
-    cmds:
-      - task: '{{if eq OS "darwin"}}build:universal:lipo:native{{else}}build:universal:lipo:go{{end}}'
 
   build:universal:lipo:native:
     summary: Creates universal binary using native lipo (macOS)
@@ -145,22 +183,19 @@ tasks:
 
   package:
     summary: Packages the application into a `.app` bundle
-    deps:
-      - task: build
     cmds:
-      - task: create:app:bundle
+      - task: build:app
 
   package:universal:
     summary: Packages darwin universal binary (arm64 + amd64)
-    deps:
-      - task: build:universal
     cmds:
-      - task: create:app:bundle
-
+      - task: build:universal
 
   create:app:bundle:
     summary: Creates an `.app` bundle
+    internal: true
     cmds:
+      - rm -rf "{{.BIN_DIR}}/{{.APP_NAME}}.app"
       - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
       - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources"
       - cp build/darwin/icons.icns "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources"
@@ -171,6 +206,29 @@ tasks:
         fi
       - cp build/darwin/Info.plist "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents"
       - task: '{{if eq OS "darwin"}}codesign:adhoc{{else}}codesign:skip{{end}}'
+
+  prepare:production-build:
+    summary: Removes stale macOS products before a clean production build
+    internal: true
+    cmds:
+      - rm -f "{{.BIN_DIR}}/{{.APP_NAME}}"
+      - rm -f "{{.BIN_DIR}}/{{.APP_NAME}}-amd64" "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"
+      - rm -f "{{.BIN_DIR}}/DKSTAppleIntelligenceHelper"
+      - rm -f "{{.BIN_DIR}}/.DS_Store"
+      - rm -rf "{{.BIN_DIR}}/{{.APP_NAME}}.app"
+      - rm -rf "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app"
+      - rm -rf "{{.BIN_DIR}}/{{.APP_NAME}}.dnt"
+
+  cleanup:production-artifacts:
+    summary: Removes macOS staging artifacts after packaging
+    internal: true
+    cmds:
+      - rm -f "{{.BIN_DIR}}/{{.APP_NAME}}"
+      - rm -f "{{.BIN_DIR}}/{{.APP_NAME}}-amd64" "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"
+      - rm -f "{{.BIN_DIR}}/DKSTAppleIntelligenceHelper"
+      - rm -f "{{.BIN_DIR}}/.DS_Store"
+      - rm -rf "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app"
+      - rm -rf "{{.BIN_DIR}}/{{.APP_NAME}}.dnt"
 
   codesign:adhoc:
     summary: Ad-hoc signs the app bundle (macOS only)

@@ -412,10 +412,41 @@ button:not(:disabled):focus-visible {
     overflow: auto;
 }
 
+.hud-result-footer {
+    display: flex;
+    min-width: 0;
+    margin: 0 -4px -4px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.hud-tts-status {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 5px;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.hud-tts-spinner {
+    width: 11px;
+    height: 11px;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    border: 1.5px solid color-mix(in srgb, var(--primary) 24%, transparent);
+    border-top-color: var(--primary);
+    border-radius: 999px;
+    animation: spin 0.72s linear infinite;
+}
+
 .hud-result-actions {
     display: flex;
     width: max-content;
-    margin: 0 -4px -4px auto;
+    margin-left: auto;
     padding: 2px;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -1579,6 +1610,7 @@ h2 {
     .modal-backdrop,
     .snippet-modal,
     .button-spinner,
+    .hud-tts-spinner,
     .ai-pulse-dot,
     .ai-progress-track span {
         animation: none;
