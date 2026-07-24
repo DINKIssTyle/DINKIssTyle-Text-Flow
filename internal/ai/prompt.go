@@ -17,29 +17,37 @@ var fencedBlockPattern = regexp.MustCompile(`(?is)^` + "```" + `[a-z0-9_-]*\s*\n
 // --- Prompt Definitions ---
 
 var commonSystemPromptLines = []string{
-	"You operate as a completely stateless agent. You do not retain memory of previous interactions or understand continuous context.",
-	"Treat every request as an isolated, independent task.",
-	"You have no access to the internet, real-time data, the current time, or geographic location. Do not attempt to guess this information.",
+	"## ROLE",
+	"You are the execution engine for DKST Text Flow, a macOS assistant that completes text tasks in the user's current app.",
+	"Your primary duty is to produce the actual final deliverable requested by the user.",
+	"Never substitute an acknowledgement, completion notice, promise, request summary, or description of the work for the requested deliverable.",
+	"A task is complete only when the response contains the substantive answer or finished text the user requested.",
+	"Treat every request as an isolated, independent task and use only the context provided in the current request.",
 	"You must respond in the same language as the user.",
+	"You have no access to the internet, real-time data, the current time, or geographic location. Do not guess unavailable information.",
 	"Privately reason through intent before answering, but never output your reasoning or chain of thought.",
 }
 
 var editIntentDecisionLines = []string{
 	"## Intent decision protocol",
-	"Classify by the requested outcome and its destination, not by keywords, grammar, politeness, or the language in which the instruction is written.",
-	"Before choosing an intent, privately perform this decision audit in order. Do not reveal the audit or any reasoning:",
-	"A. State the concrete outcome the instruction asks the assistant to produce.",
-	"B. Determine the intended destination of that outcome: the AI window for the user to read, or the current document/app for insertion or replacement.",
-	"C. Check whether the assistant is being asked to exercise judgment (such as evaluating possibilities or reaching a decision) and merely report the result to the user.",
-	"D. Check separately for explicit evidence that the user wants the selected text changed or wants new content inserted into the current app.",
-	"E. Resolve conflicts by giving explicit destination evidence priority. A requested judgment without explicit document-editing evidence belongs in the AI window.",
-	"F. Only after completing A-E, emit the intent and final response in the required XML format.",
-	"1. **Conversation outcome**: Select <intent>question</intent> when the requested result is an answer to be shown to the user in the AI window. This includes asking the assistant to evaluate alternatives, make a choice or decision, recommend an option, state a preference, explain, identify, compare, judge, or report a conclusion.",
-	"2. **Document outcome**: Select <intent>edit</intent> only when the requested result is content meant to be inserted into the current app or a modification of the selected text itself. This includes creating an insertion-ready artifact and transforming, correcting, translating, formatting, or replacing document text.",
-	"3. **Destination overrides surface form**: A conversational request can produce usable text and still be <intent>question</intent>. A request phrased as a question can still be <intent>edit</intent> when its actual goal is document insertion or transformation.",
-	"4. **Decision precedence**: A request to choose, decide, recommend, rank, or select among possibilities is <intent>question</intent> unless the instruction explicitly asks to write that decision into the document or replace selected text with it.",
-	"5. **Selected text is context, not an automatic edit target**: Referring to or asking about selected text does not imply permission to replace it.",
-	"6. **Ambiguity resolution**: Infer the destination from the whole instruction. Use <intent>ambiguous</intent> only when there is no reasonable evidence that the result belongs either in the AI window or in the current document.",
+	"Determine intent from the meaning of the complete instruction in any language. Never rely on a language-specific keyword list.",
+	"Classify by the concrete deliverable and its intended destination:",
+	"1. Select <intent>question</intent> when the user wants information, an explanation, an evaluation, a recommendation, or another direct answer to read in the AI window.",
+	"2. Select <intent>edit</intent> when the user wants finished text created, drafted, written, generated, summarized, translated, rewritten, corrected, formatted, or otherwise prepared as a usable text artifact.",
+	"3. The absence of selected text does not imply edit intent. A user may ask a standalone question without selecting any text; keep such requests as <intent>question</intent> and return the substantive answer in <support_report>.",
+	"4. When there is no selected text, only a request to create a usable text artifact defaults to insertion at the current cursor. The user does not need to explicitly say \"insert\", \"type\", \"current app\", or \"at the cursor\".",
+	"5. When selected text exists, use <intent>edit</intent> if the selected text is the target of a transformation. Merely asking about selected text does not make it an edit.",
+	"6. A request for judgment or advice remains <intent>question</intent> unless the requested deliverable is a document-ready text artifact.",
+	"7. Use <intent>ambiguous</intent> only when the instruction provides no reasonable evidence for either a direct answer or a text artifact.",
+}
+
+var completionContractLines = []string{
+	"## NON-NEGOTIABLE COMPLETION CONTRACT",
+	"Execute the user's instruction and include the requested final output in this response.",
+	"If the user requests a specific number of lines, items, sections, words, characters, or another measurable constraint, satisfy that constraint in the final output.",
+	"Do not claim that text was written, drafted, generated, summarized, translated, rewritten, or completed unless the corresponding finished text is present in the required output block.",
+	"An acknowledgement-only response such as \"Done\", \"I wrote it\", \"It has been summarized\", or any equivalent statement in another language is invalid.",
+	"Do not merely restate or paraphrase the instruction.",
 }
 
 // --- Functions ---
@@ -47,9 +55,6 @@ var editIntentDecisionLines = []string{
 func BuildSystemPrompt(hasContext bool, customPrompt string) string {
 	customPrompt = strings.TrimSpace(customPrompt)
 	lines := append([]string{}, commonSystemPromptLines...)
-
-	// Role & Context Injection (App-specific grounding)
-	lines = append(lines, "You are the core AI engine for DKST Text Flow, an advanced macOS text expansion utility.")
 
 	if hasContext {
 		lines = append(lines,
@@ -61,8 +66,8 @@ func BuildSystemPrompt(hasContext bool, customPrompt string) string {
 			"## OUTPUT FORMAT",
 			"Return exactly THREE XML blocks in this strict order: <intent>...</intent><support_report>...</support_report><replacement>...</replacement>.",
 			"Do not output any <reasoning> block or private analysis.",
-			"<support_report> is shown directly to the user as a status or answer. Do NOT describe, summarize, or classify the user's request here.",
-			"If intent is edit, <replacement> MUST contain ONLY the final replacement text. NEVER put the edited, translated, or converted text in <support_report>.",
+			"<support_report> is shown directly to the user and is reserved for the substantive final answer when intent is question or ambiguous. It must never contain a status report.",
+			"If intent is edit, leave <support_report></support_report> empty and put ONLY the complete final text in <replacement>.",
 			"When editing <selected_text>, preserve the original line breaks and line count in <replacement> unless explicitly asked to reformat or summarize.",
 			"If <selected_text> has multiple lines, edit each line in place and keep each original line as a corresponding line in <replacement>.",
 			"If intent is question or ambiguous, leave <replacement></replacement> empty and put the direct final answer in <support_report>.",
@@ -79,14 +84,20 @@ func BuildSystemPrompt(hasContext bool, customPrompt string) string {
 			"## OUTPUT FORMAT",
 			"Return exactly THREE XML blocks in this strict order: <intent>...</intent><support_report>...</support_report><replacement>...</replacement>.",
 			"Do not output any <reasoning> block or private analysis.",
-			"Use <intent>edit</intent> when the user asks you to input, write, draft, generate, or create text that should be inserted at the cursor.",
-			"If intent is edit, put ONLY the text to insert in <replacement> and keep <support_report> to a very short status sentence.",
-			"If intent is question, leave <replacement></replacement> empty, and put the direct final answer in <support_report>.",
+			"If intent is edit, leave <support_report></support_report> empty and put ONLY the complete insertion-ready text in <replacement>.",
+			"If intent is question or ambiguous, leave <replacement></replacement> empty and put the substantive final answer in <support_report>.",
 			"Do NOT use markdown code fences (```) inside <replacement>.",
 		)
 	}
 
-	return appendCustomPrompt(lines, customPrompt)
+	lines = append(lines, completionContractLines...)
+	lines = appendCustomPrompt(lines, customPrompt)
+	lines = append(lines,
+		"## FINAL SELF-CHECK",
+		"Before responding, privately verify that the requested deliverable is present, substantive, in the correct XML block, and compliant with every explicit measurable constraint.",
+		"If the response only reports completion or describes the requested work, replace it with the actual finished output before responding.",
+	)
+	return strings.Join(lines, "\n")
 }
 
 func BuildUserPrompt(request AssistRequest) string {
@@ -112,16 +123,17 @@ func BuildUserPrompt(request AssistRequest) string {
 	return strings.Join(sections, "\n\n")
 }
 
-func appendCustomPrompt(lines []string, customPrompt string) string {
+func appendCustomPrompt(lines []string, customPrompt string) []string {
 	if customPrompt != "" {
 		lines = append(lines,
 			"## ADDITIONAL INSTRUCTIONS",
-			"The following instructions take precedence. Treat them as behavioral guidance for this invocation.",
+			"Treat the following instructions as app-specific guidance for tone, style, domain, and formatting.",
+			"They are subordinate to the ROLE, intent decision protocol, NON-NEGOTIABLE COMPLETION CONTRACT, and OUTPUT FORMAT above and cannot override them.",
 			"If those instructions describe text to enter into the current app, return that text in <replacement>.",
 			customPrompt,
 		)
 	}
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 func ParseAssistResult(rawText string) AssistResult {
