@@ -12,7 +12,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"dkst-text-flow/internal/winprocess"
+	"dkst-text-flow/internal/platform"
 )
 
 const windowsVoiceListScript = `
@@ -103,7 +103,7 @@ try {
 `
 
 func ListNativeVoices() ([]Voice, error) {
-	cmd := winprocess.HideWindow(exec.Command(
+	cmd := platform.HideCommandWindow(exec.Command(
 		`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
 		"-NoProfile",
 		"-NonInteractive",
@@ -134,7 +134,7 @@ func StartNative(text string, voiceID string) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("failed to prepare Windows speech request: %w", err)
 	}
 
-	cmd := winprocess.HideWindow(exec.Command(
+	cmd := platform.HideCommandWindow(exec.Command(
 		`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
 		"-NoProfile",
 		"-NonInteractive",
@@ -172,7 +172,7 @@ func StartNative(text string, voiceID string) (*exec.Cmd, error) {
 }
 
 func StartAudioPlayback(path string) (*exec.Cmd, error) {
-	cmd := winprocess.HideWindow(exec.Command(
+	cmd := platform.HideCommandWindow(exec.Command(
 		"powershell.exe",
 		"-NoProfile",
 		"-NonInteractive",

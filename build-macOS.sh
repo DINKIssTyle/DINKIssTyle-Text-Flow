@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_NAME="DKST Text Flow"
-APP_PATH="$ROOT_DIR/bin/$APP_NAME.app"
+BUILD_BIN_DIR="bin"
+APP_PATH="$ROOT_DIR/$BUILD_BIN_DIR/$APP_NAME.app"
 ENTITLEMENTS_PATH="$ROOT_DIR/build/darwin/entitlements.plist"
 DEFAULT_IDENTITY="Apple Development: dinki@me.com (48Z2CKZS59)"
 
@@ -66,8 +67,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 cd "$ROOT_DIR"
+export GOOS=darwin
+export CGO_ENABLED=1
 
-for tool in go npm security codesign xattr; do
+for tool in go npm xcrun lipo security codesign xattr; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "Required tool not found: $tool" >&2
     exit 1
@@ -121,7 +124,7 @@ go test ./...
 
 trap cleanup_incomplete_app EXIT
 
-"$WAILS_BIN" package
+"$WAILS_BIN" package BIN_DIR="$BUILD_BIN_DIR"
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "Build output not found: $APP_PATH" >&2
@@ -155,7 +158,7 @@ if ! codesign -d --entitlements - "$APP_PATH" 2>&1 |
 fi
 
 # Remove the standalone raw binary, leaving only the signed .app bundle
-rm -f "$ROOT_DIR/bin/$APP_NAME"
+rm -f "$ROOT_DIR/$BUILD_BIN_DIR/$APP_NAME"
 
 # Update modification time to force macOS Finder to reload the app icon
 touch "$APP_PATH"

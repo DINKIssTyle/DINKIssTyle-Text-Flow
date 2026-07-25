@@ -11,9 +11,6 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
-
-	"dkst-text-flow/internal/winclipboard"
-	"dkst-text-flow/internal/winprocess"
 )
 
 const (
@@ -119,7 +116,7 @@ func activateProcess(processID int) error {
 			return nil
 		}
 	}
-	cmd := winprocess.HideWindow(exec.Command(
+	cmd := HideCommandWindow(exec.Command(
 		"powershell.exe",
 		"-NoProfile",
 		"-NonInteractive",
@@ -250,11 +247,11 @@ func modifierKeyDown() bool {
 }
 
 func readClipboardText() (string, error) {
-	return winclipboard.ReadText()
+	return ReadClipboardText()
 }
 
 func writeClipboardText(text string) error {
-	return winclipboard.WriteText(text)
+	return WriteClipboardText(text)
 }
 
 func waitForClipboardText(timeout time.Duration) (string, error) {

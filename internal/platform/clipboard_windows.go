@@ -1,6 +1,6 @@
 //go:build windows
 
-package winclipboard
+package platform
 
 import (
 	"fmt"
@@ -37,7 +37,7 @@ var (
 	procGlobalSize             = clipboardKernel32.NewProc("GlobalSize")
 )
 
-func ReadText() (string, error) {
+func ReadClipboardText() (string, error) {
 	clipboardMu.Lock()
 	defer clipboardMu.Unlock()
 
@@ -51,18 +51,18 @@ func ReadText() (string, error) {
 
 		handle, _, callErr := procGetClipboardData.Call(cfUnicodeText)
 		if handle == 0 {
-			return windowsCallError("get Unicode clipboard data", callErr)
+			return windowsClipboardCallError("get Unicode clipboard data", callErr)
 		}
 		data, _, callErr := procGlobalLock.Call(handle)
 		if data == 0 {
-			return windowsCallError("lock clipboard data", callErr)
+			return windowsClipboardCallError("lock clipboard data", callErr)
 		}
 		defer procGlobalUnlock.Call(handle)
 
 		size, _, callErr := procGlobalSize.Call(handle)
 		if size == 0 {
 			if callErr != nil && callErr != syscall.Errno(0) {
-				return windowsCallError("get clipboard data size", callErr)
+				return windowsClipboardCallError("get clipboard data size", callErr)
 			}
 			result = ""
 			return nil
@@ -82,7 +82,7 @@ func ReadText() (string, error) {
 	return result, nil
 }
 
-func WriteText(text string) error {
+func WriteClipboardText(text string) error {
 	clipboardMu.Lock()
 	defer clipboardMu.Unlock()
 
@@ -95,13 +95,13 @@ func WriteText(text string) error {
 	return withOpenClipboard(func() error {
 		emptied, _, callErr := procEmptyClipboard.Call()
 		if emptied == 0 {
-			return windowsCallError("empty clipboard", callErr)
+			return windowsClipboardCallError("empty clipboard", callErr)
 		}
 
 		byteSize := uintptr(len(units) * 2)
 		handle, _, callErr := procGlobalAlloc.Call(gmemMoveable, byteSize)
 		if handle == 0 {
-			return windowsCallError("allocate clipboard data", callErr)
+			return windowsClipboardCallError("allocate clipboard data", callErr)
 		}
 		ownedByClipboard := false
 		defer func() {
@@ -112,14 +112,14 @@ func WriteText(text string) error {
 
 		data, _, callErr := procGlobalLock.Call(handle)
 		if data == 0 {
-			return windowsCallError("lock allocated clipboard data", callErr)
+			return windowsClipboardCallError("lock allocated clipboard data", callErr)
 		}
 		copy(unsafe.Slice((*uint16)(unsafe.Pointer(data)), len(units)), units)
 		procGlobalUnlock.Call(handle)
 
 		result, _, callErr := procSetClipboardData.Call(cfUnicodeText, handle)
 		if result == 0 {
-			return windowsCallError("set Unicode clipboard data", callErr)
+			return windowsClipboardCallError("set Unicode clipboard data", callErr)
 		}
 		ownedByClipboard = true
 		return nil
@@ -137,10 +137,10 @@ func withOpenClipboard(action func() error) error {
 		lastErr = callErr
 		time.Sleep(clipboardRetryDelay)
 	}
-	return windowsCallError("open clipboard", lastErr)
+	return windowsClipboardCallError("open clipboard", lastErr)
 }
 
-func windowsCallError(action string, err error) error {
+func windowsClipboardCallError(action string, err error) error {
 	if err == nil || err == syscall.Errno(0) {
 		return fmt.Errorf("%s failed", action)
 	}

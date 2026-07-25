@@ -13,8 +13,8 @@ import (
 	"unsafe"
 
 	"dkst-text-flow/internal/flow"
+	"dkst-text-flow/internal/platform"
 	"dkst-text-flow/internal/storage"
-	"dkst-text-flow/internal/winclipboard"
 )
 
 type Store interface {
@@ -591,7 +591,7 @@ func pasteText(text string) {
 }
 
 func clipboardText() string {
-	text, err := winclipboard.ReadText()
+	text, err := platform.ReadClipboardText()
 	if err != nil {
 		return ""
 	}
@@ -599,5 +599,5 @@ func clipboardText() string {
 }
 
 func setClipboardText(text string) error {
-	return winclipboard.WriteText(text)
+	return platform.WriteClipboardText(text)
 }

@@ -1,6 +1,6 @@
 //go:build windows
 
-package winprocess
+package platform
 
 import (
 	"os/exec"
@@ -9,7 +9,7 @@ import (
 
 const createNoWindow = 0x08000000
 
-func HideWindow(cmd *exec.Cmd) *exec.Cmd {
+func HideCommandWindow(cmd *exec.Cmd) *exec.Cmd {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: createNoWindow,

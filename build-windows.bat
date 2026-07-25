@@ -8,8 +8,8 @@ if errorlevel 1 (
 )
 
 set "APP_NAME=DKST Text Flow"
-set "BUILD_BIN_DIR=build/bin"
-set "APP_PATH=%CD%\build\bin\%APP_NAME%.exe"
+set "BUILD_BIN_DIR=bin"
+set "APP_PATH=%CD%\bin\%APP_NAME%.exe"
 set "RUN_AFTER_BUILD=0"
 set "CREATE_INSTALLER=0"
 set "INSTALL_SCOPE=machine"
@@ -96,9 +96,10 @@ if "%CREATE_INSTALLER%"=="1" (
 )
 
 set "CGO_ENABLED=1"
+set "GOOS=windows"
 
-if not exist "%CD%\build\bin" (
-  mkdir "%CD%\build\bin"
+if not exist "%CD%\bin" (
+  mkdir "%CD%\bin"
   if errorlevel 1 goto failed
 )
 
