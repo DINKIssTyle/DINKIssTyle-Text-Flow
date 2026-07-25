@@ -2,6 +2,7 @@ package hotkey
 
 import (
 	"errors"
+	"runtime"
 	"strings"
 )
 
@@ -23,7 +24,7 @@ func Parse(value string) (Shortcut, error) {
 		switch token {
 		case "":
 			continue
-		case "cmd", "command", "meta":
+		case "cmd", "command", "meta", "win", "windows", "super":
 			shortcut.Command = true
 		case "ctrl", "control":
 			shortcut.Control = true
@@ -83,13 +84,24 @@ func canonicalKey(value string) string {
 func formatCanonical(shortcut Shortcut) string {
 	parts := make([]string, 0, 5)
 	if shortcut.Command {
-		parts = append(parts, "Cmd")
+		switch runtime.GOOS {
+		case "darwin":
+			parts = append(parts, "Cmd")
+		case "windows":
+			parts = append(parts, "Win")
+		default:
+			parts = append(parts, "Super")
+		}
 	}
 	if shortcut.Control {
 		parts = append(parts, "Ctrl")
 	}
 	if shortcut.Option {
-		parts = append(parts, "Option")
+		if runtime.GOOS == "darwin" {
+			parts = append(parts, "Option")
+		} else {
+			parts = append(parts, "Alt")
+		}
 	}
 	if shortcut.Shift {
 		parts = append(parts, "Shift")

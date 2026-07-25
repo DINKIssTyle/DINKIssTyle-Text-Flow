@@ -25,6 +25,7 @@ import {
     GetGeneralSettings,
     GetPlatformStatus,
     GetTTSModelStatus,
+    ListOSVoices,
     StartTTSModelDownload,
     CancelTTSModelDownload,
     ListLabels,
@@ -45,7 +46,7 @@ import {
     UpdateLabel,
     UpdateSnippet,
 } from "../bindings/dkst-text-flow/internal/app/app";
-import { Application, Clipboard, Events, Window } from "@wailsio/runtime";
+import { Application, Clipboard, Events, System, Window } from "@wailsio/runtime";
 
 import { Snippet, SnippetInput, Label, LabelInput, DashboardStats, DailyTypingStat } from "../bindings/dkst-text-flow/internal/storage/models";
 import { Status as PlatformStatus } from "../bindings/dkst-text-flow/internal/platform/models";
@@ -64,6 +65,10 @@ type AIInvocationContext = {
 
 const aiHUDCollapsedHeight = 74;
 const aiHUDMaxHeight = 420;
+const isMacOS = System.IsMac();
+const isWindows = System.IsWindows();
+const defaultAIHotkey = isMacOS ? 'Cmd+Shift+Space' : 'Ctrl+Shift+Space';
+const defaultTTSHotkey = isMacOS ? 'Cmd+Shift+T' : 'Ctrl+Shift+T';
 
 const emptyInput: SnippetInput = {
     labelId: 0,
@@ -192,13 +197,22 @@ function formatCapturedHotkey(event: KeyboardEvent): string {
     }
 
     const parts = [];
-    if (event.metaKey) parts.push('Cmd');
+    if (event.metaKey) parts.push(isMacOS ? 'Cmd' : (isWindows ? 'Win' : 'Super'));
     if (event.ctrlKey) parts.push('Ctrl');
-    if (event.altKey) parts.push('Option');
+    if (event.altKey) parts.push(isMacOS ? 'Option' : 'Alt');
     if (event.shiftKey) parts.push('Shift');
     parts.push(key);
 
     return parts.length >= 2 ? parts.join('+') : '';
+}
+
+function displayHotkey(value: string) {
+    if (isMacOS) {
+        return value;
+    }
+    return value
+        .replace(/\b(?:Cmd|Command|Meta)\b/gi, isWindows ? 'Win' : 'Super')
+        .replace(/\bOption\b/gi, 'Alt');
 }
 
 function keyLabelFromKeyboardEvent(event: KeyboardEvent): string {
@@ -229,6 +243,18 @@ type AppleIntelligenceStatusInfo = {
     state: string;
     detail?: string;
 };
+
+type OSVoiceInfo = {
+    id: string;
+    name: string;
+    language: string;
+    gender: string;
+};
+
+function osVoiceLabel(voice: OSVoiceInfo) {
+    const details = [voice.language, voice.gender].filter(Boolean);
+    return details.length > 0 ? `${voice.name} (${details.join(', ')})` : voice.name;
+}
 
 function appleIntelligenceStatusLabel(status: AppleIntelligenceStatusInfo, t: Translator) {
     switch (status.state) {
@@ -345,6 +371,9 @@ function App() {
         progress: 0,
         currentFile: '',
     });
+    const [osVoices, setOSVoices] = useState<OSVoiceInfo[]>([]);
+    const [osVoicesLoading, setOSVoicesLoading] = useState(true);
+    const [osVoicesError, setOSVoicesError] = useState('');
     const [aiPromptSettings, setAIPromptSettings] = useState<AIPromptSettings | null>(null);
     const [selectedPromptID, setSelectedPromptID] = useState('common');
     const [promptSaving, setPromptSaving] = useState(false);
@@ -481,6 +510,19 @@ function App() {
         return () => {
             cancel();
         };
+    }, []);
+
+    useEffect(() => {
+        ListOSVoices()
+            .then((voices) => {
+                setOSVoices((voices || []) as OSVoiceInfo[]);
+                setOSVoicesError('');
+            })
+            .catch((err) => {
+                setOSVoices([]);
+                setOSVoicesError(String(err));
+            })
+            .finally(() => setOSVoicesLoading(false));
     }, []);
 
     useEffect(() => {
@@ -1026,20 +1068,21 @@ function App() {
             model: settings?.model || '',
             apiKey: settings?.apiKey || '',
             temperature: Number(settings?.temperature ?? 0),
-            hotkey: settings?.hotkey || 'Cmd+Shift+Space',
+            hotkey: settings?.hotkey || defaultAIHotkey,
             useSelectedText: settings?.useSelectedText ?? true,
             useSelectedFile: !!settings?.useSelectedFile,
             replaceSelectedText: settings?.replaceSelectedText ?? true,
             pasteReplacementBundleIds: Array.isArray(settings?.pasteReplacementBundleIds)
                 ? settings.pasteReplacementBundleIds.filter((bundleId: unknown) => typeof bundleId === 'string')
-                : ['com.apple.iWork.Keynote', 'com.apple.iWork.Pages', 'com.apple.iWork.Numbers'],
+                : (isMacOS ? ['com.apple.iWork.Keynote', 'com.apple.iWork.Pages', 'com.apple.iWork.Numbers'] : []),
             ttsEnabled: !!settings?.ttsEnabled,
             ttsEngine: settings?.ttsEngine || 'os',
             ttsEndpoint: settings?.ttsEndpoint || 'http://localhost:7788',
             ttsVoice: settings?.ttsVoice || 'M1',
+            ttsOsVoice: settings?.ttsOsVoice || '',
             ttsUseAiResponse: !!settings?.ttsUseAiResponse,
             ttsUseShortcut: !!settings?.ttsUseShortcut,
-            ttsShortcut: settings?.ttsShortcut || 'Cmd+Shift+T',
+            ttsShortcut: settings?.ttsShortcut || defaultTTSHotkey,
             ttsSpeed: settings?.ttsSpeed || 1.05,
             ttsSteps: settings?.ttsSteps || 8,
         } as any;
@@ -2005,7 +2048,7 @@ function App() {
                                 <h1>{t('settings')}</h1>
                                 <p>{t('settingsDescription')}</p>
                             </div>
-                            <div className="action-row">
+                            {isMacOS && <div className="action-row">
                                 <button onClick={refreshPlatformStatus}>{t('refresh')}</button>
                                 <button
                                     className={platformStatus?.accessibilityTrusted ? undefined : 'primary-button'}
@@ -2013,17 +2056,17 @@ function App() {
                                 >
                                     {t('requestPermission')}
                                 </button>
-                            </div>
+                            </div>}
                         </div>
                         <div className="settings-list">
-                            <div className={platformStatus?.accessibilityTrusted ? 'settings-status success' : 'settings-status danger'}>
+                            {isMacOS && <div className={platformStatus?.accessibilityTrusted ? 'settings-status success' : 'settings-status danger'}>
                                 <span>{t('accessibilityPermission')}</span>
                                 <strong>{platformStatus?.accessibilityTrusted ? t('granted') : t('required')}</strong>
-                            </div>
-                            <div>
+                            </div>}
+                            {isMacOS && <div>
                                 <span>{t('secureInput')}</span>
                                 <strong>{platformStatus?.secureInputActive ? t('active') : t('notDetected')}</strong>
-                            </div>
+                            </div>}
                             <div>
                                 <span>{t('aiActiveStatus')}</span>
                                 <strong>{aiSettings?.enabled ? t('enabled') : t('disabled')}</strong>
@@ -2160,7 +2203,7 @@ function App() {
                                             >
                                                 <option value="openai">{t('openaiCompatible')}</option>
                                                 <option value="lmstudio">{t('lmStudioCompatible')}</option>
-                                                <option value="apple_intelligence">{t('appleIntelligence')}</option>
+                                                {isMacOS && <option value="apple_intelligence">{t('appleIntelligence')}</option>}
                                             </select>
                                         </label>
                                         <label>
@@ -2175,7 +2218,7 @@ function App() {
                                                 onBlur={() => setRecordingHotkey(false)}
                                                 onKeyDown={captureHotkey}
                                             >
-                                                {recordingHotkey ? t('pressShortcut') : (aiSettings.hotkey || t('recordShortcut'))}
+                                                {recordingHotkey ? t('pressShortcut') : displayHotkey(aiSettings.hotkey || t('recordShortcut'))}
                                             </button>
                                         </label>
                                     </div>
@@ -2240,7 +2283,7 @@ function App() {
                                             </div>
                                         </>
                                     )}
-                                    <label className="wide-setting">
+                                    {isMacOS && <label className="wide-setting">
                                         {t('pasteReplacementBundleIds')}
                                         <div className="bundle-list-control">
                                             <textarea
@@ -2255,7 +2298,7 @@ function App() {
                                             <button type="button" onClick={browsePasteReplacementApp}>{t('browse')}</button>
                                         </div>
                                         <span className="field-hint">{t('pasteReplacementBundleIdsHint')}</span>
-                                    </label>
+                                    </label>}
 
                                     <hr className="settings-divider" />
 
@@ -2331,10 +2374,41 @@ function App() {
                                                 onKeyDown={captureTtsHotkey}
                                             >
                                                 {/* @ts-ignore */}
-                                                {recordingTtsHotkey ? t('pressShortcut') : (aiSettings.ttsShortcut || t('recordShortcut'))}
+                                                {recordingTtsHotkey ? t('pressShortcut') : displayHotkey(aiSettings.ttsShortcut || t('recordShortcut'))}
                                             </button>
                                         </label>
                                     </div>
+
+                                    {/* @ts-ignore */}
+                                    {aiSettings.ttsEngine === 'os' && (
+                                        <div className="settings-form-grid">
+                                            <label>
+                                                {t('osTtsVoice')}
+                                                <select
+                                                    // @ts-ignore
+                                                    value={aiSettings.ttsOsVoice || ''}
+                                                    disabled={osVoicesLoading}
+                                                    // @ts-ignore
+                                                    onChange={(event) => setAISettings({ ...aiSettings, ttsOsVoice: event.target.value })}
+                                                >
+                                                    <option value="">
+                                                        {osVoicesLoading ? t('loadingOsVoices') : t('systemDefaultVoice')}
+                                                    </option>
+                                                    {/* @ts-ignore */}
+                                                    {aiSettings.ttsOsVoice && !osVoices.some((voice) => voice.id === aiSettings.ttsOsVoice) && (
+                                                        // @ts-ignore
+                                                        <option value={aiSettings.ttsOsVoice}>{t('unavailableOsVoice')}</option>
+                                                    )}
+                                                    {osVoices.map((voice) => (
+                                                        <option key={voice.id || voice.name} value={voice.id}>
+                                                            {osVoiceLabel(voice)}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                            {osVoicesError && <span className="field-hint">{t('osVoicesLoadFailed')}</span>}
+                                        </div>
+                                    )}
 
                                     {/* @ts-ignore */}
                                     {aiSettings.ttsEngine === 'supertonic3' && (

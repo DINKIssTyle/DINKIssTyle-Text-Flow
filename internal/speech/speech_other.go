@@ -1,4 +1,4 @@
-//go:build !darwin && !windows
+//go:build !darwin && !windows && !linux
 
 package speech
 
@@ -7,8 +7,12 @@ import (
 	"os/exec"
 )
 
-func StartNative(text string) (*exec.Cmd, error) {
-	return nil, fmt.Errorf("native TTS is not supported on this operating system yet")
+func ListNativeVoices() ([]Voice, error) {
+	return nil, fmt.Errorf("OS TTS is not supported on this operating system yet")
+}
+
+func StartNative(text string, voiceID string) (*exec.Cmd, error) {
+	return nil, fmt.Errorf("OS TTS is not supported on this operating system yet")
 }
 
 func StartAudioPlayback(path string) (*exec.Cmd, error) {

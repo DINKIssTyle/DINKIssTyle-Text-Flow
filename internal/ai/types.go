@@ -15,7 +15,7 @@ const (
 	DefaultHotkey      = "Cmd+Shift+Space"
 )
 
-var DefaultPasteReplacementBundleIDs = []string{
+var defaultMacPasteReplacementBundleIDs = []string{
 	"com.apple.iWork.Keynote",
 	"com.apple.iWork.Pages",
 	"com.apple.iWork.Numbers",
@@ -39,6 +39,7 @@ type Settings struct {
 	TTSEngine        string  `json:"ttsEngine"`        // "os" or "supertonic3"
 	TTSEndpoint      string  `json:"ttsEndpoint"`      // e.g., "http://localhost:7788"
 	TTSVoice         string  `json:"ttsVoice"`         // e.g., "default" or "M1", "F1", etc.
+	TTSOSVoice       string  `json:"ttsOsVoice"`       // OS-specific persistent voice identifier
 	TTSUseAIResponse bool    `json:"ttsUseAiResponse"` // Speak on AI response
 	TTSUseShortcut   bool    `json:"ttsUseShortcut"`   // Speak on shortcut hotkey
 	TTSShortcut      string  `json:"ttsShortcut"`      // Hotkey for TTS reading
@@ -81,25 +82,27 @@ type AssistResult struct {
 }
 
 func DefaultSettings() Settings {
+	pasteReplacementBundleIDs := []string{}
+	if runtime.GOOS == "darwin" {
+		pasteReplacementBundleIDs = append(pasteReplacementBundleIDs, defaultMacPasteReplacementBundleIDs...)
+	}
 	return Settings{
-		Enabled:             false,
-		Provider:            ProviderOpenAI,
-		Endpoint:            DefaultEndpoint,
-		Temperature:         DefaultTemperature,
-		Hotkey:              DefaultHotkeyForPlatform(),
-		UseSelectedText:     true,
-		UseSelectedFile:     false,
-		ReplaceSelectedText: true,
-		PasteReplacementBundleIDs: append(
-			[]string{},
-			DefaultPasteReplacementBundleIDs...,
-		),
+		Enabled:                   false,
+		Provider:                  ProviderOpenAI,
+		Endpoint:                  DefaultEndpoint,
+		Temperature:               DefaultTemperature,
+		Hotkey:                    DefaultHotkeyForPlatform(),
+		UseSelectedText:           true,
+		UseSelectedFile:           false,
+		ReplaceSelectedText:       true,
+		PasteReplacementBundleIDs: pasteReplacementBundleIDs,
 
 		// TTS Defaults
 		TTSEnabled:       false,
 		TTSEngine:        "os",
 		TTSEndpoint:      "http://localhost:7788",
 		TTSVoice:         "M1",
+		TTSOSVoice:       "",
 		TTSUseAIResponse: false,
 		TTSUseShortcut:   false,
 		TTSShortcut:      DefaultTTSHotkeyForPlatform(),
@@ -109,14 +112,14 @@ func DefaultSettings() Settings {
 }
 
 func DefaultHotkeyForPlatform() string {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || runtime.GOOS == "linux" {
 		return "Ctrl+Shift+Space"
 	}
 	return DefaultHotkey
 }
 
 func DefaultTTSHotkeyForPlatform() string {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || runtime.GOOS == "linux" {
 		return "Ctrl+Shift+T"
 	}
 	return "Cmd+Shift+T"
@@ -132,6 +135,9 @@ func NormalizeSettings(settings Settings) Settings {
 	if settings.Provider != ProviderOpenAI &&
 		settings.Provider != ProviderLMStudio &&
 		settings.Provider != ProviderAppleIntelligence {
+		settings.Provider = ProviderOpenAI
+	}
+	if runtime.GOOS != "darwin" && settings.Provider == ProviderAppleIntelligence {
 		settings.Provider = ProviderOpenAI
 	}
 
@@ -190,10 +196,11 @@ func NormalizeSettings(settings Settings) Settings {
 	if settings.TTSVoice == "" || settings.TTSVoice == "default" {
 		settings.TTSVoice = "M1"
 	}
+	settings.TTSOSVoice = strings.TrimSpace(settings.TTSOSVoice)
 
 	settings.TTSShortcut = strings.TrimSpace(settings.TTSShortcut)
 	if settings.TTSShortcut == "" {
-		settings.TTSShortcut = "Cmd+Shift+T"
+		settings.TTSShortcut = defaults.TTSShortcut
 	}
 
 	if settings.TTSSpeed <= 0 {

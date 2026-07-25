@@ -480,6 +480,10 @@ func (a *App) GetTTSModelStatus() (ai.TTSModelStatus, error) {
 	return ai.CheckModelStatus(supertonicDir), nil
 }
 
+func (a *App) ListOSVoices() ([]speech.Voice, error) {
+	return speech.ListNativeVoices()
+}
+
 func (a *App) StartTTSModelDownload() error {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
@@ -784,7 +788,7 @@ func (a *App) speakWithSettings(text string, settings ai.Settings, requireEnable
 
 	switch settings.TTSEngine {
 	case "os":
-		cmd, err := speech.StartNative(text)
+		cmd, err := speech.StartNative(text, settings.TTSOSVoice)
 		if err != nil {
 			return err
 		}

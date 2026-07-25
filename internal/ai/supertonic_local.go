@@ -1,9 +1,10 @@
-//go:build darwin
+//go:build darwin || windows || linux
 
 package ai
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"context"
 	"encoding/binary"
@@ -17,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -262,10 +264,74 @@ var (
 	ortInitErr error
 )
 
+const onnxRuntimeVersion = "1.18.1"
+
+type onnxRuntimeAsset struct {
+	archiveName string
+	libraryName string
+	url         string
+	format      string
+}
+
+func currentONNXRuntimeAsset() (onnxRuntimeAsset, error) {
+	const releaseBase = "https://github.com/microsoft/onnxruntime/releases/download/v" + onnxRuntimeVersion + "/"
+
+	var archiveName string
+	var libraryName string
+	var format string
+	switch runtime.GOOS {
+	case "darwin":
+		archiveName = "onnxruntime-osx-universal2-" + onnxRuntimeVersion + ".tgz"
+		libraryName = "libonnxruntime.dylib"
+		format = "tgz"
+	case "windows":
+		arch, err := onnxRuntimeArchitecture("x64", "arm64")
+		if err != nil {
+			return onnxRuntimeAsset{}, err
+		}
+		archiveName = "onnxruntime-win-" + arch + "-" + onnxRuntimeVersion + ".zip"
+		libraryName = "onnxruntime.dll"
+		format = "zip"
+	case "linux":
+		arch, err := onnxRuntimeArchitecture("x64", "aarch64")
+		if err != nil {
+			return onnxRuntimeAsset{}, err
+		}
+		archiveName = "onnxruntime-linux-" + arch + "-" + onnxRuntimeVersion + ".tgz"
+		libraryName = "libonnxruntime.so"
+		format = "tgz"
+	default:
+		return onnxRuntimeAsset{}, fmt.Errorf("Supertonic is not supported on %s", runtime.GOOS)
+	}
+
+	return onnxRuntimeAsset{
+		archiveName: archiveName,
+		libraryName: libraryName,
+		url:         releaseBase + archiveName,
+		format:      format,
+	}, nil
+}
+
+func onnxRuntimeArchitecture(amd64Name, arm64Name string) (string, error) {
+	switch runtime.GOARCH {
+	case "amd64":
+		return amd64Name, nil
+	case "arm64":
+		return arm64Name, nil
+	default:
+		return "", fmt.Errorf("Supertonic is not supported on %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+}
+
 func InitONNXRuntime(supertonicDir string) error {
 	ortOnce.Do(func() {
-		dylibPath := filepath.Join(supertonicDir, "runtime", "libonnxruntime.dylib")
-		ort.SetSharedLibraryPath(dylibPath)
+		asset, err := currentONNXRuntimeAsset()
+		if err != nil {
+			ortInitErr = err
+			return
+		}
+		libraryPath := filepath.Join(supertonicDir, "runtime", asset.libraryName)
+		ort.SetSharedLibraryPath(libraryPath)
 		ortInitErr = ort.InitializeEnvironment()
 	})
 	return ortInitErr
@@ -639,26 +705,6 @@ var (
 
 const TotalDownloadBytes = 417542601
 
-var fileExpectedSizes = map[string]int64{
-	"duration_predictor.onnx":               3700147,
-	"text_encoder.onnx":                     36416150,
-	"vector_estimator.onnx":                 256534781,
-	"vocoder.onnx":                          101424195,
-	"unicode_indexer.json":                  277676,
-	"tts.json":                              8253,
-	"voice_styles/M1.json":                  291748,
-	"voice_styles/M2.json":                  292055,
-	"voice_styles/M3.json":                  290198,
-	"voice_styles/M4.json":                  291522,
-	"voice_styles/M5.json":                  291469,
-	"voice_styles/F1.json":                  292046,
-	"voice_styles/F2.json":                  292423,
-	"voice_styles/F3.json":                  290794,
-	"voice_styles/F4.json":                  291808,
-	"voice_styles/F5.json":                  291479,
-	"onnxruntime-osx-universal2-1.18.1.tgz": 16265857,
-}
-
 func CheckModelStatus(supertonicDir string) TTSModelStatus {
 	downloadMu.Lock()
 	defer downloadMu.Unlock()
@@ -671,6 +717,10 @@ func CheckModelStatus(supertonicDir string) TTSModelStatus {
 	onnxDir := filepath.Join(supertonicDir, "onnx")
 	voiceStylesDir := filepath.Join(supertonicDir, "voice_styles")
 	runtimeDir := filepath.Join(supertonicDir, "runtime")
+	runtimeAsset, err := currentONNXRuntimeAsset()
+	if err != nil {
+		return TTSModelStatus{IsDownloaded: false, Status: "unsupported", Error: err.Error()}
+	}
 
 	// 1. Verify models exist
 	models := []string{"duration_predictor.onnx", "text_encoder.onnx", "vector_estimator.onnx", "vocoder.onnx", "unicode_indexer.json", "tts.json"}
@@ -689,7 +739,7 @@ func CheckModelStatus(supertonicDir string) TTSModelStatus {
 	}
 
 	// 3. Verify ONNX Runtime library exists
-	if !fileIsNonEmpty(filepath.Join(runtimeDir, "libonnxruntime.dylib")) {
+	if !fileIsNonEmpty(filepath.Join(runtimeDir, runtimeAsset.libraryName)) {
 		return TTSModelStatus{IsDownloaded: false, Status: "idle"}
 	}
 
@@ -805,16 +855,27 @@ func runDownloader(ctx context.Context, supertonicDir string, onProgress func(TT
 		}
 	}
 
-	// 3. Download ONNX Runtime archive and extract dylib
-	runtimeURL := "https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-osx-universal2-1.18.1.tgz"
-	dylibDest := filepath.Join(runtimeDir, "libonnxruntime.dylib")
-
-	err := downloadAndExtractDylib(ctx, runtimeURL, dylibDest, updateProgress)
+	// 3. Download and extract the ONNX Runtime library for this OS and architecture.
+	runtimeAsset, err := currentONNXRuntimeAsset()
+	if err != nil {
+		setError(err.Error())
+		return
+	}
+	runtimeArchive := filepath.Join(runtimeDir, runtimeAsset.archiveName+".download")
+	runtimeLibrary := filepath.Join(runtimeDir, runtimeAsset.libraryName)
+	err = downloadFile(ctx, runtimeAsset.url, runtimeArchive, runtimeAsset.archiveName, updateProgress)
 	if err != nil {
 		if ctx.Err() != nil {
 			return // Canceled
 		}
-		setError(fmt.Sprintf("Failed to download or extract ONNX Runtime dylib: %v", err))
+		setError(fmt.Sprintf("Failed to download ONNX Runtime: %v", err))
+		return
+	}
+	defer os.Remove(runtimeArchive)
+
+	err = extractONNXRuntimeLibrary(runtimeArchive, runtimeLibrary, runtimeAsset)
+	if err != nil {
+		setError(fmt.Sprintf("Failed to extract ONNX Runtime: %v", err))
 		return
 	}
 
@@ -874,30 +935,25 @@ func downloadFile(ctx context.Context, url string, dest string, fileName string,
 	return nil
 }
 
-func downloadAndExtractDylib(ctx context.Context, url string, dest string, updateProgress func(string, int64)) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+func extractONNXRuntimeLibrary(archivePath, dest string, asset onnxRuntimeAsset) error {
+	switch asset.format {
+	case "tgz":
+		return extractONNXRuntimeFromTarGz(archivePath, dest, asset.libraryName)
+	case "zip":
+		return extractONNXRuntimeFromZip(archivePath, dest, asset.libraryName)
+	default:
+		return fmt.Errorf("unsupported ONNX Runtime archive format: %s", asset.format)
+	}
+}
+
+func extractONNXRuntimeFromTarGz(archivePath, dest, libraryName string) error {
+	archive, err := os.Open(archivePath)
 	if err != nil {
 		return err
 	}
+	defer archive.Close()
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad status: %s", resp.Status)
-	}
-
-	progressReader := &progressTrackingReader{
-		r: resp.Body,
-		onRead: func(n int64) {
-			updateProgress("onnxruntime-osx-universal2-1.18.1.tgz", n)
-		},
-	}
-
-	gr, err := gzip.NewReader(progressReader)
+	gr, err := gzip.NewReader(archive)
 	if err != nil {
 		return err
 	}
@@ -913,36 +969,64 @@ func downloadAndExtractDylib(ctx context.Context, url string, dest string, updat
 			return err
 		}
 
-		if header.Typeflag == tar.TypeReg && strings.Contains(header.Name, "libonnxruntime") && strings.HasSuffix(header.Name, ".dylib") {
-			out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
-			if err != nil {
-				return err
-			}
-			defer out.Close()
-
-			_, err = io.Copy(out, tr)
-			if err != nil {
-				_ = os.Remove(dest)
-				return err
-			}
-			return nil
+		if header.Typeflag == tar.TypeReg && runtimeLibraryEntryMatches(header.Name, libraryName) {
+			return writeRuntimeLibrary(dest, tr)
 		}
 	}
 
-	return fmt.Errorf("libonnxruntime library not found in tar.gz archive")
+	return fmt.Errorf("%s was not found in %s", libraryName, filepath.Base(archivePath))
 }
 
-type progressTrackingReader struct {
-	r      io.Reader
-	onRead func(int64)
-}
-
-func (pr *progressTrackingReader) Read(p []byte) (int, error) {
-	n, err := pr.r.Read(p)
-	if n > 0 {
-		pr.onRead(int64(n))
+func extractONNXRuntimeFromZip(archivePath, dest, libraryName string) error {
+	archive, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return err
 	}
-	return n, err
+	defer archive.Close()
+
+	for _, entry := range archive.File {
+		if entry.FileInfo().IsDir() || !runtimeLibraryEntryMatches(entry.Name, libraryName) {
+			continue
+		}
+		source, err := entry.Open()
+		if err != nil {
+			return err
+		}
+		err = writeRuntimeLibrary(dest, source)
+		_ = source.Close()
+		return err
+	}
+	return fmt.Errorf("%s was not found in %s", libraryName, filepath.Base(archivePath))
+}
+
+func runtimeLibraryEntryMatches(entryName, libraryName string) bool {
+	baseName := filepath.Base(filepath.ToSlash(entryName))
+	switch libraryName {
+	case "libonnxruntime.dylib":
+		return strings.HasPrefix(baseName, "libonnxruntime") && strings.HasSuffix(baseName, ".dylib")
+	case "libonnxruntime.so":
+		return baseName == libraryName || strings.HasPrefix(baseName, libraryName+".")
+	default:
+		return strings.EqualFold(baseName, libraryName)
+	}
+}
+
+func writeRuntimeLibrary(dest string, source io.Reader) error {
+	out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, source)
+	closeErr := out.Close()
+	if copyErr != nil {
+		_ = os.Remove(dest)
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(dest)
+		return closeErr
+	}
+	return nil
 }
 
 // Local TTS Helpers
