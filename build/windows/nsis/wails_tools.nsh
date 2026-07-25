@@ -117,6 +117,8 @@ RequestExecutionLevel "${REQUEST_EXECUTION_LEVEL}"
             File "/oname=${PRODUCT_EXECUTABLE}" "${ARG_WAILS_ARM64_BINARY}"
         ${EndIf}
     !endif
+
+    File "/oname=docicon.ico" "..\docicon.ico"
 !macroend
 
 !macro wails.writeUninstaller
@@ -227,13 +229,22 @@ RequestExecutionLevel "${REQUEST_EXECUTION_LEVEL}"
 !macroend
 
 !macro wails.associateFiles
-    ; Create file associations
-    
+    ; Register only the .DTF document icon. Intentionally omit a ProgID and
+    ; open verb so double-clicking a backup never launches the application.
+    WriteRegStr SHELL_CONTEXT "Software\Classes\.DTF" "Content Type" "application/json"
+    WriteRegStr SHELL_CONTEXT "Software\Classes\.DTF\DefaultIcon" "" "$INSTDIR\docicon.ico"
+    System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 !macroend
 
 !macro wails.unassociateFiles
-    ; Delete app associations
-    
+    ; Remove the icon only when it still points at this installation.
+    ReadRegStr $R0 SHELL_CONTEXT "Software\Classes\.DTF\DefaultIcon" ""
+    StrCmp $R0 "$INSTDIR\docicon.ico" 0 wails_dtf_icon_done
+    DeleteRegKey SHELL_CONTEXT "Software\Classes\.DTF\DefaultIcon"
+    DeleteRegValue SHELL_CONTEXT "Software\Classes\.DTF" "Content Type"
+    DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\.DTF"
+    System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+    wails_dtf_icon_done:
 !macroend
 
 !macro CUSTOM_PROTOCOL_ASSOCIATE PROTOCOL DESCRIPTION ICON COMMAND

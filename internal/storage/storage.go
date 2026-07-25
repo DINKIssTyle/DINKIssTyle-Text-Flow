@@ -603,6 +603,152 @@ func (s *Store) SetJSONSetting(key string, value any) error {
 	return s.SetSetting(key, string(data))
 }
 
+// RestoreContentBackup atomically replaces the snippet library and the supplied
+// JSON settings. Backup IDs are preserved so snippet-to-label relationships
+// remain intact across machines.
+func (s *Store) RestoreContentBackup(labels []Label, snippets []Snippet, settings map[string]string) error {
+	if s == nil || s.db == nil {
+		return errors.New("storage is not ready")
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	normalizedLabels := make([]Label, 0, len(labels))
+	labelIDs := make(map[int64]struct{}, len(labels))
+	for _, label := range labels {
+		if label.ID <= 0 {
+			return errors.New("backup contains an invalid label ID")
+		}
+		if _, exists := labelIDs[label.ID]; exists {
+			return fmt.Errorf("backup contains duplicate label ID %d", label.ID)
+		}
+		input, err := normalizeLabelInput(LabelInput{
+			Name:        label.Name,
+			Description: label.Description,
+			Color:       label.Color,
+		})
+		if err != nil {
+			return fmt.Errorf("invalid backup label %d: %w", label.ID, err)
+		}
+		label.Name = input.Name
+		label.Description = input.Description
+		label.Color = input.Color
+		if strings.TrimSpace(label.CreatedAt) == "" {
+			label.CreatedAt = now
+		}
+		if strings.TrimSpace(label.UpdatedAt) == "" {
+			label.UpdatedAt = label.CreatedAt
+		}
+		labelIDs[label.ID] = struct{}{}
+		normalizedLabels = append(normalizedLabels, label)
+	}
+
+	normalizedSnippets := make([]Snippet, 0, len(snippets))
+	snippetIDs := make(map[int64]struct{}, len(snippets))
+	shortcuts := make(map[string]struct{}, len(snippets))
+	for _, snippet := range snippets {
+		if snippet.ID <= 0 {
+			return errors.New("backup contains an invalid snippet ID")
+		}
+		if _, exists := snippetIDs[snippet.ID]; exists {
+			return fmt.Errorf("backup contains duplicate snippet ID %d", snippet.ID)
+		}
+		if snippet.LabelID > 0 {
+			if _, exists := labelIDs[snippet.LabelID]; !exists {
+				return fmt.Errorf("snippet %d references missing label %d", snippet.ID, snippet.LabelID)
+			}
+		}
+		input, err := normalizeInput(SnippetInput{
+			LabelID:       snippet.LabelID,
+			Shortcut:      snippet.Shortcut,
+			Title:         snippet.Title,
+			Content:       snippet.Content,
+			ContentType:   snippet.ContentType,
+			Enabled:       snippet.Enabled,
+			CaseSensitive: snippet.CaseSensitive,
+			UsePaste:      snippet.UsePaste,
+			ExpandMode:    snippet.ExpandMode,
+		})
+		if err != nil {
+			return fmt.Errorf("invalid backup snippet %d: %w", snippet.ID, err)
+		}
+		if _, exists := shortcuts[input.Shortcut]; exists {
+			return fmt.Errorf("backup contains duplicate shortcut %q", input.Shortcut)
+		}
+		if snippet.UsageCount < 0 {
+			return fmt.Errorf("snippet %d has an invalid usage count", snippet.ID)
+		}
+		snippet.LabelID = input.LabelID
+		snippet.Shortcut = input.Shortcut
+		snippet.Title = input.Title
+		snippet.Content = input.Content
+		snippet.ContentType = input.ContentType
+		snippet.ExpandMode = input.ExpandMode
+		if strings.TrimSpace(snippet.CreatedAt) == "" {
+			snippet.CreatedAt = now
+		}
+		if strings.TrimSpace(snippet.UpdatedAt) == "" {
+			snippet.UpdatedAt = snippet.CreatedAt
+		}
+		snippetIDs[snippet.ID] = struct{}{}
+		shortcuts[input.Shortcut] = struct{}{}
+		normalizedSnippets = append(normalizedSnippets, snippet)
+	}
+
+	for key := range settings {
+		if strings.TrimSpace(key) == "" {
+			return errors.New("backup setting key is required")
+		}
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("DELETE FROM snippets"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM labels"); err != nil {
+		return err
+	}
+
+	for _, label := range normalizedLabels {
+		if _, err := tx.Exec(`
+			INSERT INTO labels (id, name, description, color, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, label.ID, label.Name, label.Description, label.Color, label.CreatedAt, label.UpdatedAt); err != nil {
+			return fmt.Errorf("restore label %d: %w", label.ID, err)
+		}
+	}
+
+	for _, snippet := range normalizedSnippets {
+		if _, err := tx.Exec(`
+			INSERT INTO snippets (
+				id, label_id, shortcut, title, content, content_type, enabled, case_sensitive,
+				use_paste, expand_mode, usage_count, created_at, updated_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, snippet.ID, labelIDArg(snippet.LabelID), snippet.Shortcut, snippet.Title, snippet.Content,
+			snippet.ContentType, snippet.Enabled, snippet.CaseSensitive, snippet.UsePaste,
+			snippet.ExpandMode, snippet.UsageCount, snippet.CreatedAt, snippet.UpdatedAt); err != nil {
+			return fmt.Errorf("restore snippet %d: %w", snippet.ID, err)
+		}
+	}
+
+	for key, value := range settings {
+		if _, err := tx.Exec(`
+			INSERT INTO settings (key, value)
+			VALUES (?, ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value
+		`, strings.TrimSpace(key), value); err != nil {
+			return fmt.Errorf("restore setting %q: %w", key, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (s *Store) migrate() error {
 	_, err := s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS snippets (

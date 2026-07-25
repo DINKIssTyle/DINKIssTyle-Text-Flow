@@ -31,6 +31,7 @@ func main() {
 			Handler: application.AssetFileServerFS(assets),
 		},
 		Mac: application.MacOptions{
+			ActivationPolicy: application.ActivationPolicyAccessory,
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 	})
@@ -54,7 +55,7 @@ func main() {
 		mainWindow.Hide()
 	})
 
-	// Intercept macOS Dock click to show only the main window and avoid showing other windows (like AI Assist)
+	// Show only the main window when macOS asks the running app to reopen.
 	appInst.Event.RegisterApplicationEventHook(events.Mac.ApplicationShouldHandleReopen, func(event *application.ApplicationEvent) {
 		event.Cancel()
 		app.ShowMainWindow()

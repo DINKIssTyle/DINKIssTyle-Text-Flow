@@ -1277,6 +1277,63 @@ h2 {
     border-top: 1px solid var(--border);
 }
 
+.settings-editor {
+    display: block;
+}
+
+.settings-footer-actions {
+    position: sticky;
+    bottom: -10px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 16px -10px -10px;
+    padding: 12px 10px 10px;
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--panel-bg) 94%, transparent);
+    backdrop-filter: blur(10px);
+}
+
+.settings-footer-actions button {
+    min-width: 72px;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.settings-footer-transfer-actions,
+.settings-footer-save-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.settings-footer-transfer-actions {
+    min-width: 0;
+}
+
+.settings-footer-transfer-actions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.settings-footer-transfer-actions .material-symbols-rounded {
+    font-size: 16px;
+}
+
+.settings-footer-notice {
+    overflow: hidden;
+    color: var(--good);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .settings-section .compact {
     margin-bottom: 0;
 }
@@ -1972,6 +2029,14 @@ h2 {
     gap: 8px;
 }
 
+.tts-model-status-section.ready {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 20px;
+    padding-block: 9px;
+}
+
 .tts-model-status-title {
     font-size: 13px;
     font-weight: 500;
@@ -2024,6 +2089,24 @@ h2 {
     background: var(--control-border);
     color: var(--muted);
     cursor: not-allowed;
+}
+
+.tts-model-redownload-link {
+    align-self: center;
+    padding: 1px 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--primary);
+    font-size: 11px;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.tts-model-redownload-link:not(:disabled):hover {
+    border-color: transparent;
+    box-shadow: none;
+    text-decoration-thickness: 2px;
 }
 
 .tts-test-playback-btn {

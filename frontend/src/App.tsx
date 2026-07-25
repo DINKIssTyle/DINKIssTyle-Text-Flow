@@ -8,6 +8,7 @@ import { createTranslator, languageOptions, normalizeLanguage, Translator, Langu
 import {
     ActivateProcess,
     AssignSnippetLabel,
+    BackupSnippetsAndAIPrompts,
     BrowseAIPromptApp,
     CancelAIRequest,
     ConfirmLabelDeletion,
@@ -25,6 +26,7 @@ import {
     GetGeneralSettings,
     GetPlatformStatus,
     GetTTSModelStatus,
+    ImportSnippetsAndAIPrompts,
     ListOSVoices,
     StartTTSModelDownload,
     CancelTTSModelDownload,
@@ -377,8 +379,9 @@ function App() {
     const [aiPromptSettings, setAIPromptSettings] = useState<AIPromptSettings | null>(null);
     const [selectedPromptID, setSelectedPromptID] = useState('common');
     const [promptSaving, setPromptSaving] = useState(false);
-    const [generalSaving, setGeneralSaving] = useState(false);
-    const [aiSaving, setAISaving] = useState(false);
+    const [settingsSaving, setSettingsSaving] = useState(false);
+    const [settingsTransfer, setSettingsTransfer] = useState<'backup' | 'import' | null>(null);
+    const [settingsTransferNotice, setSettingsTransferNotice] = useState('');
     const [query, setQuery] = useState('');
     const [selectedLabelID, setSelectedLabelID] = useState(0);
     const [selectedID, setSelectedID] = useState<number | null>(null);
@@ -424,7 +427,8 @@ function App() {
     const aiInsertionInFlightRef = useRef(false);
     const aiTTSGenerationRef = useRef(0);
     const aiSettingsRef = useRef<AISettings | null>(null);
-    const aiSettingsSaveGenerationRef = useRef(0);
+    const savedGeneralSettingsRef = useRef<GeneralSettings | null>(null);
+    const savedAISettingsRef = useRef<AISettings | null>(null);
     const snippetContentRef = useRef<HTMLTextAreaElement | null>(null);
     const shortcutInputRef = useRef<HTMLInputElement | null>(null);
     const soundNameRef = useRef(noSoundName);
@@ -499,10 +503,15 @@ function App() {
 
     useEffect(() => {
         refresh('').catch((err) => setError(String(err)));
-        GetGeneralSettings().then((settings) => setGeneralSettings(normalizeGeneralSettings(settings))).catch((err) => setError(String(err)));
+        GetGeneralSettings().then((settings) => {
+            const normalized = normalizeGeneralSettings(settings);
+            savedGeneralSettingsRef.current = normalized;
+            setGeneralSettings(normalized);
+        }).catch((err) => setError(String(err)));
         GetAISettings().then((settings) => {
             const normalized = normalizeAISettings(settings);
             aiSettingsRef.current = normalized;
+            savedAISettingsRef.current = normalized;
             setAISettings(normalized);
         }).catch((err) => setError(String(err)));
         GetAIPromptSettings().then((settings) => setAIPromptSettings(normalizeAIPromptSettings(settings))).catch((err) => setError(String(err)));
@@ -515,6 +524,7 @@ function App() {
             }
             const normalized = normalizeAISettings(event.data);
             aiSettingsRef.current = normalized;
+            savedAISettingsRef.current = normalized;
             setAISettings(normalized);
         });
         return () => cancel();
@@ -1037,20 +1047,8 @@ function App() {
         });
     }
 
-    function updateAndSaveGeneralSettings(patch: Partial<GeneralSettings>) {
-        if (!generalSettings) {
-            return;
-        }
-        const nextSettings = {
-            ...generalSettings,
-            ...patch,
-        };
-        setGeneralSettings(nextSettings);
-        void saveGeneralSettings(nextSettings);
-    }
-
     function updateSoundSetting(soundName: string) {
-        updateAndSaveGeneralSettings({ soundName });
+        updateGeneralSettings({ soundName });
         playCompletionSound(soundName);
     }
 
@@ -1118,74 +1116,114 @@ function App() {
         return bundleIds.join('\n');
     }
 
-    async function saveGeneralSettings(nextSettings = generalSettings) {
-        if (!nextSettings) {
+    async function saveAllSettings() {
+        if (!generalSettings || !aiSettings) {
             return;
         }
-        setGeneralSaving(true);
+        setSettingsSaving(true);
+        setError('');
+
+        const [generalResult, aiResult] = await Promise.allSettled([
+            SaveGeneralSettings(generalSettings),
+            SaveAISettings(aiSettings),
+        ]);
+
+        if (generalResult.status === 'fulfilled') {
+            const normalized = normalizeGeneralSettings(generalResult.value);
+            savedGeneralSettingsRef.current = normalized;
+            setGeneralSettings(normalized);
+        }
+        if (aiResult.status === 'fulfilled') {
+            const normalized = normalizeAISettings(aiResult.value);
+            savedAISettingsRef.current = normalized;
+            aiSettingsRef.current = normalized;
+            setAISettings(normalized);
+        }
+
+        const failedResult = [generalResult, aiResult].find((result) => result.status === 'rejected');
+        if (failedResult?.status === 'rejected') {
+            setError(String(failedResult.reason));
+        }
+        setSettingsSaving(false);
+    }
+
+    function cancelSettingsChanges() {
+        if (savedGeneralSettingsRef.current) {
+            setGeneralSettings(normalizeGeneralSettings(savedGeneralSettingsRef.current));
+        }
+        if (savedAISettingsRef.current) {
+            const normalized = normalizeAISettings(savedAISettingsRef.current);
+            aiSettingsRef.current = normalized;
+            setAISettings(normalized);
+        }
+        setRecordingHotkey(false);
+        setRecordingTtsHotkey(false);
+        setError('');
+    }
+
+    async function backupSnippetsAndAIPrompts() {
+        setSettingsTransfer('backup');
+        setSettingsTransferNotice('');
         setError('');
         try {
-            const saved = await SaveGeneralSettings(nextSettings);
-            setGeneralSettings(normalizeGeneralSettings(saved));
+            const completed = await BackupSnippetsAndAIPrompts(language);
+            if (completed) {
+                setSettingsTransferNotice(t('contentBackupComplete'));
+            }
         } catch (err) {
             setError(String(err));
         } finally {
-            setGeneralSaving(false);
+            setSettingsTransfer(null);
         }
     }
 
-    async function saveAISettings(nextSettings = aiSettings) {
-        if (!nextSettings) {
-            return null;
-        }
-        const saveGeneration = aiSettingsSaveGenerationRef.current + 1;
-        aiSettingsSaveGenerationRef.current = saveGeneration;
-        setAISaving(true);
+    async function importSnippetsAndAIPrompts() {
+        setSettingsTransfer('import');
+        setSettingsTransferNotice('');
         setError('');
         try {
-            const saved = await SaveAISettings(nextSettings);
-            const normalized = normalizeAISettings(saved);
-            if (saveGeneration === aiSettingsSaveGenerationRef.current) {
-                aiSettingsRef.current = normalized;
-                setAISettings(normalized);
+            const completed = await ImportSnippetsAndAIPrompts(language);
+            if (!completed) {
+                return;
             }
-            return normalized;
+            const nextPromptSettings = await GetAIPromptSettings();
+            setAIPromptSettings(normalizeAIPromptSettings(nextPromptSettings));
+            setSelectedPromptID('common');
+            setQuery('');
+            setSelectedLabelID(0);
+            setSelectedID(null);
+            setDetailMode('all');
+            await refresh('', 0);
+            setSettingsTransferNotice(t('contentImportComplete'));
         } catch (err) {
             setError(String(err));
-            return null;
         } finally {
-            if (saveGeneration === aiSettingsSaveGenerationRef.current) {
-                setAISaving(false);
-            }
+            setSettingsTransfer(null);
         }
     }
 
-    function updateAndSaveAITTSSettings(patch: Partial<AISettings>) {
-        const currentSettings = aiSettingsRef.current;
-        if (!currentSettings) {
-            return;
-        }
-        const nextSettings = {
-            ...currentSettings,
-            ...patch,
-        };
-        aiSettingsRef.current = nextSettings;
-        setAISettings(nextSettings);
-        void saveAISettings(nextSettings);
+    function updateAITTSSettings(patch: Partial<AISettings>) {
+        setAISettings((currentSettings) => {
+            if (!currentSettings) {
+                return currentSettings;
+            }
+            const nextSettings = {
+                ...currentSettings,
+                ...patch,
+            };
+            aiSettingsRef.current = nextSettings;
+            return nextSettings;
+        });
     }
 
     async function testTTSPlayback() {
-        const currentSettings = aiSettingsRef.current;
+        const currentSettings = aiSettings;
         if (!currentSettings) {
             return;
         }
         setError('');
         try {
-            const normalized = await saveAISettings(currentSettings);
-            if (!normalized) {
-                return;
-            }
-            await TestSpeak("Hello! 안녕하세요. DKST Text Flow TTS 테스트입니다.", normalized);
+            await TestSpeak("Hello! 안녕하세요. DKST Text Flow TTS 테스트입니다.", currentSettings);
         } catch (err) {
             setError(String(err));
             alert(err);
@@ -2136,23 +2174,20 @@ function App() {
                             </div>
                         </div>
                         {aiSettings && (
-                            <>
+                            <form
+                                className="settings-editor"
+                                onSubmit={(event) => {
+                                    event.preventDefault();
+                                    void saveAllSettings();
+                                }}
+                            >
                                 {generalSettings && (
-                                    <form
-                                        className="settings-section"
-                                        onSubmit={(event) => {
-                                            event.preventDefault();
-                                            saveGeneralSettings();
-                                        }}
-                                    >
+                                    <section className="settings-section">
                                         <div className="panel-header compact">
                                             <div>
                                                 <h2>{t('general')}</h2>
                                                 <p>{t('generalDescription')}</p>
                                             </div>
-                                            {/* <button className="primary-button" type="submit" disabled={generalSaving}>
-                                                {generalSaving ? t('saving') : t('save')}
-                                            </button> */}
                                         </div>
                                         <div className="settings-form-grid">
                                             <label>
@@ -2209,30 +2244,21 @@ function App() {
                                                 <input
                                                     type="checkbox"
                                                     checked={generalSettings.startAtLogin}
-                                                    disabled={generalSaving}
-                                                    onChange={(event) => updateAndSaveGeneralSettings({
+                                                    disabled={settingsSaving}
+                                                    onChange={(event) => updateGeneralSettings({
                                                         startAtLogin: event.target.checked,
                                                     })}
                                                 />
                                             </label>
                                         </div>
-                                    </form>
+                                    </section>
                                 )}
-                                <form
-                                    className="settings-section ai-settings"
-                                    onSubmit={(event) => {
-                                        event.preventDefault();
-                                        saveAISettings();
-                                    }}
-                                >
+                                <section className="settings-section ai-settings">
                                     <div className="panel-header compact">
                                         <div>
                                             <h2>{t('aiAssistant')}</h2>
                                             <p>{t('aiSettingsDescription')}</p>
                                         </div>
-                                        <button className="primary-button" type="submit" disabled={aiSaving}>
-                                            {aiSaving ? t('saving') : t('save')}
-                                        </button>
                                     </div>
                                     <div className="check-row">
                                         <label>
@@ -2416,7 +2442,7 @@ function App() {
                                                 // @ts-ignore
                                                 value={aiSettings.ttsEngine || 'os'}
                                                 // @ts-ignore
-                                                onChange={(event) => updateAndSaveAITTSSettings({ ttsEngine: event.target.value } as Partial<AISettings>)}
+                                                onChange={(event) => updateAITTSSettings({ ttsEngine: event.target.value } as Partial<AISettings>)}
                                             >
                                                 <option value="os">{t('osTts')}</option>
                                                 <option value="supertonic3">{t('supertonic3')}</option>
@@ -2450,7 +2476,7 @@ function App() {
                                                     value={aiSettings.ttsOsVoice || ''}
                                                     disabled={osVoicesLoading}
                                                     // @ts-ignore
-                                                    onChange={(event) => updateAndSaveAITTSSettings({ ttsOsVoice: event.target.value } as Partial<AISettings>)}
+                                                    onChange={(event) => updateAITTSSettings({ ttsOsVoice: event.target.value } as Partial<AISettings>)}
                                                 >
                                                     <option value="">
                                                         {osVoicesLoading ? t('loadingOsVoices') : t('systemDefaultVoice')}
@@ -2524,7 +2550,7 @@ function App() {
                                                     />
                                                 </label>
                                             </div>
-                                            <div className="tts-model-status-section">
+                                            <div className={`tts-model-status-section ${modelStatus.isDownloaded && modelStatus.status !== 'downloading' ? 'ready' : ''}`}>
                                                 <div className="tts-model-status-title">
                                                     {modelStatus.isDownloaded ? t('ttsModelReady') : (
                                                         modelStatus.status === 'error' ? t('ttsModelDownloadFailed') : t('ttsModelNotReady')
@@ -2553,7 +2579,7 @@ function App() {
                                                         </button>
                                                     </>
                                                 )}
-                                                {modelStatus.status !== 'downloading' && (
+                                                {modelStatus.status !== 'downloading' && !modelStatus.isDownloaded && (
                                                     <button
                                                         className="tts-model-download-btn"
                                                         type="button"
@@ -2564,11 +2590,61 @@ function App() {
                                                         {t('downloadTtsModel')}
                                                     </button>
                                                 )}
+                                                {modelStatus.status !== 'downloading' && modelStatus.isDownloaded && (
+                                                    <button
+                                                        className="tts-model-redownload-link"
+                                                        type="button"
+                                                        onClick={() => {
+                                                            StartTTSModelDownload().catch(err => alert(err));
+                                                        }}
+                                                    >
+                                                        {t('redownloadTtsModel')}
+                                                    </button>
+                                                )}
                                             </div>
                                         </>
                                     )}
-                                </form>
-                            </>
+                                </section>
+                                <div className="settings-footer-actions">
+                                    <div className="settings-footer-transfer-actions">
+                                        <button
+                                            type="button"
+                                            disabled={settingsTransfer !== null}
+                                            onClick={() => void backupSnippetsAndAIPrompts()}
+                                        >
+                                            <span className="material-symbols-rounded" aria-hidden="true">backup</span>
+                                            {settingsTransfer === 'backup' ? t('backingUpContent') : t('backupSnippetsAndAIPrompts')}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={settingsTransfer !== null}
+                                            onClick={() => void importSnippetsAndAIPrompts()}
+                                        >
+                                            <span className="material-symbols-rounded" aria-hidden="true">upload_file</span>
+                                            {settingsTransfer === 'import' ? t('importingContent') : t('importContentBackup')}
+                                        </button>
+                                        {settingsTransferNotice && (
+                                            <span className="settings-footer-notice" role="status">{settingsTransferNotice}</span>
+                                        )}
+                                    </div>
+                                    <div className="settings-footer-save-actions">
+                                        <button
+                                            type="button"
+                                            disabled={settingsSaving || settingsTransfer !== null}
+                                            onClick={cancelSettingsChanges}
+                                        >
+                                            {t('cancel')}
+                                        </button>
+                                        <button
+                                            className="primary-button"
+                                            type="submit"
+                                            disabled={settingsSaving || settingsTransfer !== null || !generalSettings}
+                                        >
+                                            {settingsSaving ? t('saving') : t('save')}
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
                         )}
                     </section>
                 )}

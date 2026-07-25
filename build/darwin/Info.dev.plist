@@ -22,6 +22,30 @@
 		<string>1.0.0</string>
 		<key>LSMinimumSystemVersion</key>
 		<string>12.0.0</string>
+		<key>LSUIElement</key>
+		<true/>
+		<key>UTExportedTypeDeclarations</key>
+		<array>
+			<dict>
+				<key>UTTypeIdentifier</key>
+				<string>com.dinkisstyle.textflow.backup</string>
+				<key>UTTypeConformsTo</key>
+				<array>
+					<string>public.json</string>
+				</array>
+				<key>UTTypeDescription</key>
+				<string>DKST Text Flow Backup</string>
+				<key>UTTypeIconFile</key>
+				<string>docicon.icns</string>
+				<key>UTTypeTagSpecification</key>
+				<dict>
+					<key>public.filename-extension</key>
+					<array>
+						<string>DTF</string>
+					</array>
+				</dict>
+			</dict>
+		</array>
 		<key>NSAppTransportSecurity</key>
 		<dict>
 			<key>NSAllowsLocalNetworking</key>
