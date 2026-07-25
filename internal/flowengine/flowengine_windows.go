@@ -586,7 +586,7 @@ func pasteText(text string) {
 	procKeybdEvent.Call(vkControl, 0, 0, syntheticInputMarker)
 	postKey(vkV)
 	procKeybdEvent.Call(vkControl, 0, keyeventfKeyup, syntheticInputMarker)
-	time.Sleep(80 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 	_ = setClipboardText(previous)
 }
 

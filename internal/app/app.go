@@ -709,6 +709,7 @@ func (a *App) showAIPrompt(sourceProcessID int, requireEnabled bool) {
 			aiWin.SetAlwaysOnTop(true)
 			aiWin.UnMinimise()
 			aiWin.Show()
+			windowing.ActivateForInput(aiWin)
 			aiWin.Focus()
 		})
 		appInst.Event.Emit("ai:invoke", invocation)

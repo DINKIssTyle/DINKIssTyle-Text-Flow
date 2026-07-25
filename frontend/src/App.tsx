@@ -388,6 +388,7 @@ function App() {
     const aiHUDHeightRef = useRef(aiHUDCollapsedHeight);
     const aiHUDMeasureFrameRef = useRef<number | null>(null);
     const aiResponseActionTimerRef = useRef<number | null>(null);
+    const aiFocusGenerationRef = useRef(0);
     // Invalidates callbacks from requests that belonged to a closed or replaced HUD session.
     const aiRequestGenerationRef = useRef(0);
     const aiRequestRunningRef = useRef(false);
@@ -594,10 +595,11 @@ function App() {
                 appName: context?.appName || '',
                 appBundleId: context?.appBundleId || '',
             });
+            const focusGeneration = ++aiFocusGenerationRef.current;
             window.setTimeout(() => {
-                aiPromptRef.current?.focus();
+                focusAIPromptInput(focusGeneration);
                 resizeAIPrompt();
-            }, 30);
+            }, 0);
         });
         return cancel;
     }, []);
@@ -623,6 +625,7 @@ function App() {
 
     useEffect(() => {
         return () => {
+            aiFocusGenerationRef.current += 1;
             if (aiHUDMeasureFrameRef.current !== null) {
                 window.cancelAnimationFrame(aiHUDMeasureFrameRef.current);
             }
@@ -914,6 +917,7 @@ function App() {
     }
 
     async function hideCurrentWindow(cancelRunning = true) {
+        aiFocusGenerationRef.current += 1;
         setHasBeenInvoked(false);
         const shouldCancelRequest = cancelRunning && aiRequestRunningRef.current;
         resetAIHUDContent();
@@ -1241,6 +1245,29 @@ function App() {
         window.requestAnimationFrame(resizeAIHUD);
     }
 
+    async function focusAIPromptInput(generation: number, attempt = 0) {
+        if (generation !== aiFocusGenerationRef.current) {
+            return;
+        }
+        try {
+            await Window.Focus();
+        } catch {
+            // The DOM focus retry below still handles an already-active window.
+        }
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+        if (generation !== aiFocusGenerationRef.current) {
+            return;
+        }
+        const textarea = aiPromptRef.current;
+        textarea?.focus({ preventScroll: true });
+        if (textarea && document.activeElement === textarea) {
+            return;
+        }
+        if (attempt < 5) {
+            window.setTimeout(() => focusAIPromptInput(generation, attempt + 1), 50 * (attempt + 1));
+        }
+    }
+
     function resizeAIHUD() {
         if (windowMode !== 'hud' || !hasBeenInvoked) {
             return;
@@ -1557,6 +1584,7 @@ function App() {
                         >
                             <textarea
                                 ref={aiPromptRef}
+                                autoFocus
                                 value={aiPrompt}
                                 onChange={(event) => updateAIPrompt(event.target.value)}
                                 onKeyDown={handleAIPromptKeyDown}

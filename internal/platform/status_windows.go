@@ -6,20 +6,30 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 	"unsafe"
 
 	"dkst-text-flow/internal/winclipboard"
+	"dkst-text-flow/internal/winprocess"
 )
 
 const (
 	processQueryLimitedInformation = 0x1000
 	keyeventfKeyup                 = 0x0002
 	vkControl                      = 0x11
+	vkShift                        = 0x10
+	vkMenu                         = 0x12
 	vkC                            = 0x43
 	vkV                            = 0x56
+	vkLWin                         = 0x5B
+	vkRWin                         = 0x5C
+	hotkeyReleaseTimeout           = 750 * time.Millisecond
+	clipboardCopyTimeout           = 500 * time.Millisecond
+	clipboardPollInterval          = 20 * time.Millisecond
+	clipboardPasteSettleDuration   = 200 * time.Millisecond
 )
 
 var (
@@ -28,10 +38,15 @@ var (
 	procGetForegroundWindow    = user32.NewProc("GetForegroundWindow")
 	procGetWindowThreadProcess = user32.NewProc("GetWindowThreadProcessId")
 	procSetForegroundWindow    = user32.NewProc("SetForegroundWindow")
+	procEnumWindows            = user32.NewProc("EnumWindows")
+	procIsWindowVisible        = user32.NewProc("IsWindowVisible")
+	procShowWindowAsync        = user32.NewProc("ShowWindowAsync")
 	procKeybdEvent             = user32.NewProc("keybd_event")
+	procGetAsyncKeyState       = user32.NewProc("GetAsyncKeyState")
 	procOpenProcess            = kernel32.NewProc("OpenProcess")
 	procCloseHandle            = kernel32.NewProc("CloseHandle")
 	procQueryFullProcessImage  = kernel32.NewProc("QueryFullProcessImageNameW")
+	enumWindowForPIDCallback   = syscall.NewCallback(enumWindowForPID)
 )
 
 func CurrentStatus() Status {
@@ -56,14 +71,17 @@ func selectedText() (string, error) {
 }
 
 func selectedTextFromProcess(processID int) (string, error) {
+	waitForModifierKeysReleased(hotkeyReleaseTimeout)
 	if processID > 0 {
 		_ = activateProcess(processID)
 	}
 
 	previous, previousErr := readClipboardText()
+	if err := writeClipboardText(""); err != nil {
+		return "", err
+	}
 	sendCtrlKey(vkC)
-	time.Sleep(140 * time.Millisecond)
-	selected, err := readClipboardText()
+	selected, err := waitForClipboardText(clipboardCopyTimeout)
 	if previousErr == nil {
 		_ = writeClipboardText(previous)
 	}
@@ -84,7 +102,7 @@ func replaceSelectedTextInProcess(processID int, replacement string, preferPaste
 	}
 	_ = activateProcess(processID)
 	sendCtrlKey(vkV)
-	time.Sleep(160 * time.Millisecond)
+	time.Sleep(clipboardPasteSettleDuration)
 	if previousErr == nil {
 		_ = writeClipboardText(previous)
 	}
@@ -92,19 +110,25 @@ func replaceSelectedTextInProcess(processID int, replacement string, preferPaste
 }
 
 func activateProcess(processID int) error {
-	hwnd := foregroundWindowForPID(processID)
+	hwnd := windowForPID(processID)
 	if hwnd != 0 {
-		procSetForegroundWindow.Call(hwnd)
-		time.Sleep(60 * time.Millisecond)
-		return nil
+		procShowWindowAsync.Call(hwnd, 9)
+		activated, _, _ := procSetForegroundWindow.Call(hwnd)
+		if activated != 0 {
+			time.Sleep(60 * time.Millisecond)
+			return nil
+		}
 	}
-	cmd := exec.Command(
+	cmd := winprocess.HideWindow(exec.Command(
 		"powershell.exe",
 		"-NoProfile",
+		"-NonInteractive",
 		"-Command",
 		fmt.Sprintf("(New-Object -ComObject WScript.Shell).AppActivate(%d) | Out-Null", processID),
-	)
-	_ = cmd.Run()
+	))
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("activate process %d: %w", processID, err)
+	}
 	time.Sleep(60 * time.Millisecond)
 	return nil
 }
@@ -147,16 +171,36 @@ func getFrontmostPID() int {
 	return int(pid)
 }
 
-func foregroundWindowForPID(processID int) uintptr {
-	hwnd, _, _ := procGetForegroundWindow.Call()
-	if hwnd == 0 {
+type windowSearch struct {
+	processID uint32
+	hwnd      uintptr
+}
+
+func windowForPID(processID int) uintptr {
+	if processID <= 0 {
 		return 0
+	}
+	search := windowSearch{processID: uint32(processID)}
+	procEnumWindows.Call(
+		enumWindowForPIDCallback,
+		uintptr(unsafe.Pointer(&search)),
+	)
+	runtime.KeepAlive(&search)
+	return search.hwnd
+}
+
+func enumWindowForPID(hwnd uintptr, searchPtr uintptr) uintptr {
+	search := (*windowSearch)(unsafe.Pointer(searchPtr))
+	visible, _, _ := procIsWindowVisible.Call(hwnd)
+	if visible == 0 {
+		return 1
 	}
 	var pid uint32
 	procGetWindowThreadProcess.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
-	if int(pid) == processID {
-		return hwnd
+	if pid != search.processID {
+		return 1
 	}
+	search.hwnd = hwnd
 	return 0
 }
 
@@ -188,10 +232,48 @@ func sendCtrlKey(key uintptr) {
 	procKeybdEvent.Call(vkControl, 0, keyeventfKeyup, 0)
 }
 
+func waitForModifierKeysReleased(timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for modifierKeyDown() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func modifierKeyDown() bool {
+	for _, key := range []uintptr{vkControl, vkShift, vkMenu, vkLWin, vkRWin} {
+		state, _, _ := procGetAsyncKeyState.Call(key)
+		if state&0x8000 != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func readClipboardText() (string, error) {
 	return winclipboard.ReadText()
 }
 
 func writeClipboardText(text string) error {
 	return winclipboard.WriteText(text)
+}
+
+func waitForClipboardText(timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		text, err := readClipboardText()
+		if err == nil && text != "" {
+			return text, nil
+		}
+		if err != nil {
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return "", lastErr
+			}
+			return "", nil
+		}
+		time.Sleep(clipboardPollInterval)
+	}
 }
