@@ -1,4 +1,8 @@
-# OS generated files
+# Created by DINKIssTyle on 2026. Copyright (C) 2026 DINKI'ssTyle. All rights reserved.
+
+# ==========================================
+# OS Generated Files
+# ==========================================
 .DS_Store
 .DS_Store?
 ._*
@@ -7,17 +11,38 @@
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+[Dd]esktop.ini
+.LSOverride
 
-# IDE & Editor files
+# ==========================================
+# IDE & Editor Files
+# ==========================================
 .idea/
 .vscode/
+.zed/
+.fleet/
+.history/
 *.swp
 *.swo
 *~
+*.user
+*.suo
 
+# ==========================================
+# Environment & Secrets
+# ==========================================
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ==========================================
 # Go Build & Executable Artifacts
+# ==========================================
 bin/
 build/bin/
+dist/
 *.app/
 *.exe
 *.exe~
@@ -25,43 +50,70 @@ build/bin/
 *.so
 *.dylib
 dkst-text-flow
+__debug_bin*
+debug
+debug.test
 
-# Go Test Artifacts & Coverage
+# ==========================================
+# Go Test Artifacts & Coverage & Profiling
+# ==========================================
 *.test
 *.out
 *.prof
+*.pprof
 c.out
 coverage.txt
 coverage.html
 coverage.xml
 
+# ==========================================
 # Go, Wails & Task Build Cache
+# ==========================================
 .cache/
 .go/
 .task/
 .wails/
+.wails3/
 wails.json.tmp
+wails.log
 
+# ==========================================
 # Frontend Build & Temporary Artifacts
+# ==========================================
 node_modules/
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
+.vite/
 frontend/.bindings-tmp*
+.bindings-tmp*
 package.json.md5
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
 
+# ==========================================
 # Logs
+# ==========================================
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Mobile / iOS Build Artifacts
+# ==========================================
+# Mobile / macOS / Xcode Build Artifacts
+# ==========================================
 build/ios/DerivedData/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
 
-# User Notes
+# ==========================================
+# User Notes & Project Custom Exclusions
+# ==========================================
 Note/
 bin/DKST Text Flow
 internal/ai/prompt_test.go
-bin/DKST Text Flow
 internal/ai/apple_intelligence_test.go

@@ -1,8 +1,7 @@
-package main
+package app
 
 import (
 	"context"
-	_ "embed"
 	"errors"
 	"fmt"
 	"os"
@@ -17,13 +16,13 @@ import (
 	"dkst-text-flow/internal/hotkey"
 	"dkst-text-flow/internal/loginitem"
 	"dkst-text-flow/internal/platform"
+	"dkst-text-flow/internal/speech"
 	"dkst-text-flow/internal/storage"
+	"dkst-text-flow/internal/tray"
+	"dkst-text-flow/internal/windowing"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
-
-//go:embed build/menu_icon.png
-var menuIcon []byte
 
 const (
 	aiSettingsKey       = "ai.settings"
@@ -87,17 +86,19 @@ type App struct {
 	expansionSoundStopper   context.CancelFunc
 	ttsCmd                  *exec.Cmd
 	ttsMu                   sync.Mutex
-	systray                 *application.SystemTray
+	trayManager             *tray.Manager
 	supertonicEngine        *ai.SupertonicEngine
 	supertonicEngineMu      sync.Mutex
+	menuIcon                []byte
 }
 
-// NewApp creates a new App application struct
-func NewApp() *App {
+// New creates the Wails application service.
+func New(menuIcon []byte) *App {
 	return &App{
 		aiClient:                ai.NewClient(),
 		appleIntelligenceClient: ai.NewAppleIntelligenceClient(),
 		expansionSoundEvents:    make(chan struct{}, 8),
+		menuIcon:                append([]byte(nil), menuIcon...),
 	}
 }
 
@@ -566,7 +567,7 @@ func (a *App) CancelAIRequest() {
 	}
 }
 
-func (a *App) showMainWindow() {
+func (a *App) ShowMainWindow() {
 	appInst := application.Get()
 	if mainWin, ok := appInst.Window.GetByName("main"); ok {
 		application.InvokeSync(func() {
@@ -581,6 +582,28 @@ func (a *App) showMainWindow() {
 			appInst.Event.Emit("app:show-main")
 		})
 	}
+}
+
+func (a *App) configureSystemTray(appInst *application.App) {
+	a.trayManager = tray.New(appInst, a.menuIcon, tray.Actions{
+		AskAI: func() {
+			go a.showAIPrompt(platform.GetFrontmostPID(), false)
+		},
+		ShowMainWindow: func() {
+			go a.ShowMainWindow()
+		},
+		Quit: func() {
+			go appInst.Quit()
+		},
+	})
+}
+
+func (a *App) destroySystemTray() {
+	if a.trayManager == nil {
+		return
+	}
+	a.trayManager.Destroy()
+	a.trayManager = nil
 }
 
 func (a *App) startExpansionSoundDispatcher(ctx context.Context) {
@@ -704,7 +727,7 @@ func (a *App) ResizeAIPromptWindow(height int) {
 	appInst := application.Get()
 	if aiWin, ok := appInst.Window.GetByName("ai"); ok {
 		application.InvokeSync(func() {
-			resizeWindowFromTop(aiWin, width, height)
+			windowing.ResizeFromTop(aiWin, width, height)
 		})
 	}
 }
@@ -714,12 +737,12 @@ func (a *App) normalizeAISettings(settings ai.Settings) ai.Settings {
 	if parsed, err := hotkey.Parse(normalized.Hotkey); err == nil {
 		normalized.Hotkey = parsed.Canonical
 	} else {
-		normalized.Hotkey = ai.DefaultHotkey
+		normalized.Hotkey = ai.DefaultHotkeyForPlatform()
 	}
 	if parsed, err := hotkey.Parse(normalized.TTSShortcut); err == nil {
 		normalized.TTSShortcut = parsed.Canonical
 	} else {
-		normalized.TTSShortcut = "Cmd+Shift+T"
+		normalized.TTSShortcut = ai.DefaultTTSHotkeyForPlatform()
 	}
 	return normalized
 }
@@ -760,11 +783,11 @@ func (a *App) speakWithSettings(text string, settings ai.Settings, requireEnable
 
 	switch settings.TTSEngine {
 	case "os":
-		a.ttsCmd = exec.Command("say", text)
-		err := a.ttsCmd.Start()
+		cmd, err := speech.StartNative(text)
 		if err != nil {
-			return fmt.Errorf("failed to start say command: %w", err)
+			return err
 		}
+		a.ttsCmd = cmd
 		go func(cmd *exec.Cmd) {
 			_ = cmd.Wait()
 			a.ttsMu.Lock()
@@ -836,12 +859,12 @@ func (a *App) speakWithSettings(text string, settings ai.Settings, requireEnable
 			return fmt.Errorf("failed to write WAV data: %w", err)
 		}
 
-		a.ttsCmd = exec.Command("afplay", tempFilePath)
-		err = a.ttsCmd.Start()
+		cmd, err := speech.StartAudioPlayback(tempFilePath)
 		if err != nil {
 			_ = os.Remove(tempFilePath)
-			return fmt.Errorf("failed to start afplay command: %w", err)
+			return err
 		}
+		a.ttsCmd = cmd
 
 		go func(cmd *exec.Cmd, filePath string) {
 			_ = cmd.Wait()

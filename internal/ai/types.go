@@ -1,6 +1,9 @@
 package ai
 
-import "strings"
+import (
+	"runtime"
+	"strings"
+)
 
 const (
 	ProviderOpenAI            = "openai"
@@ -83,7 +86,7 @@ func DefaultSettings() Settings {
 		Provider:            ProviderOpenAI,
 		Endpoint:            DefaultEndpoint,
 		Temperature:         DefaultTemperature,
-		Hotkey:              DefaultHotkey,
+		Hotkey:              DefaultHotkeyForPlatform(),
 		UseSelectedText:     true,
 		UseSelectedFile:     false,
 		ReplaceSelectedText: true,
@@ -99,10 +102,24 @@ func DefaultSettings() Settings {
 		TTSVoice:         "M1",
 		TTSUseAIResponse: false,
 		TTSUseShortcut:   false,
-		TTSShortcut:      "Cmd+Shift+T",
+		TTSShortcut:      DefaultTTSHotkeyForPlatform(),
 		TTSSpeed:         1.05,
 		TTSSteps:         8,
 	}
+}
+
+func DefaultHotkeyForPlatform() string {
+	if runtime.GOOS == "windows" {
+		return "Ctrl+Shift+Space"
+	}
+	return DefaultHotkey
+}
+
+func DefaultTTSHotkeyForPlatform() string {
+	if runtime.GOOS == "windows" {
+		return "Ctrl+Shift+T"
+	}
+	return "Cmd+Shift+T"
 }
 
 func NormalizeSettings(settings Settings) Settings {

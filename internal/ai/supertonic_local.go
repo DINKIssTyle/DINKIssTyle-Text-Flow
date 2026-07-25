@@ -1,3 +1,5 @@
+//go:build darwin
+
 package ai
 
 import (
@@ -638,22 +640,22 @@ var (
 const TotalDownloadBytes = 417542601
 
 var fileExpectedSizes = map[string]int64{
-	"duration_predictor.onnx": 3700147,
-	"text_encoder.onnx":       36416150,
-	"vector_estimator.onnx":   256534781,
-	"vocoder.onnx":            101424195,
-	"unicode_indexer.json":    277676,
-	"tts.json":                8253,
-	"voice_styles/M1.json":    291748,
-	"voice_styles/M2.json":    292055,
-	"voice_styles/M3.json":    290198,
-	"voice_styles/M4.json":    291522,
-	"voice_styles/M5.json":    291469,
-	"voice_styles/F1.json":    292046,
-	"voice_styles/F2.json":    292423,
-	"voice_styles/F3.json":    290794,
-	"voice_styles/F4.json":    291808,
-	"voice_styles/F5.json":    291479,
+	"duration_predictor.onnx":               3700147,
+	"text_encoder.onnx":                     36416150,
+	"vector_estimator.onnx":                 256534781,
+	"vocoder.onnx":                          101424195,
+	"unicode_indexer.json":                  277676,
+	"tts.json":                              8253,
+	"voice_styles/M1.json":                  291748,
+	"voice_styles/M2.json":                  292055,
+	"voice_styles/M3.json":                  290198,
+	"voice_styles/M4.json":                  291522,
+	"voice_styles/M5.json":                  291469,
+	"voice_styles/F1.json":                  292046,
+	"voice_styles/F2.json":                  292423,
+	"voice_styles/F3.json":                  290794,
+	"voice_styles/F4.json":                  291808,
+	"voice_styles/F5.json":                  291479,
 	"onnxruntime-osx-universal2-1.18.1.tgz": 16265857,
 }
 

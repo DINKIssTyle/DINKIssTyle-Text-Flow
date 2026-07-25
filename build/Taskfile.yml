@@ -212,22 +212,22 @@ tasks:
   frontend:dev:npm:
     dir: frontend
     cmds:
-      - npm run dev -- --port {{.VITE_PORT}} --strictPort
+      - npm run dev -- --port {{.VITE_PORT}} --strictPort {{if eq OS "windows"}}--host 127.0.0.1{{end}}
 
   frontend:dev:yarn:
     dir: frontend
     cmds:
-      - yarn dev --port {{.VITE_PORT}} --strictPort
+      - yarn dev --port {{.VITE_PORT}} --strictPort {{if eq OS "windows"}}--host 127.0.0.1{{end}}
 
   frontend:dev:pnpm:
     dir: frontend
     cmds:
-      - pnpm dev --port {{.VITE_PORT}} --strictPort
+      - pnpm dev --port {{.VITE_PORT}} --strictPort {{if eq OS "windows"}}--host 127.0.0.1{{end}}
 
   frontend:dev:bun:
     dir: frontend
     cmds:
-      - bun run dev --port {{.VITE_PORT}} --strictPort
+      - bun run dev --port {{.VITE_PORT}} --strictPort {{if eq OS "windows"}}--host 127.0.0.1{{end}}
 
   update:build-assets:
     summary: Updates the build assets

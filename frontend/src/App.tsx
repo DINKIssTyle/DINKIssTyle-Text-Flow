@@ -44,13 +44,13 @@ import {
     UpdateAIPromptProfile,
     UpdateLabel,
     UpdateSnippet,
-} from "../bindings/dkst-text-flow/app";
+} from "../bindings/dkst-text-flow/internal/app/app";
 import { Application, Clipboard, Events, Window } from "@wailsio/runtime";
 
 import { Snippet, SnippetInput, Label, LabelInput, DashboardStats, DailyTypingStat } from "../bindings/dkst-text-flow/internal/storage/models";
 import { Status as PlatformStatus } from "../bindings/dkst-text-flow/internal/platform/models";
 import { Settings as AISettings } from "../bindings/dkst-text-flow/internal/ai/models";
-import { GeneralSettings, AIPromptRule, AIPromptProfile, AIPromptProfileInput, AIPromptSettings } from "../bindings/dkst-text-flow/models";
+import { GeneralSettings, AIPromptRule, AIPromptProfile, AIPromptProfileInput, AIPromptSettings } from "../bindings/dkst-text-flow/internal/app/models";
 
 type AIInvocationContext = {
     kind: string;

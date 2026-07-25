@@ -94,14 +94,10 @@ export interface Settings {
 }
 
 /**
- * TTSModelStatus holds status for downloading models
+ * TTSModelStatus holds status for downloading models.
  */
 export interface TTSModelStatus {
     "isDownloaded": boolean;
-
-    /**
-     * "idle", "downloading", "done", "error"
-     */
     "status": string;
     "progress": number;
     "currentFile": string;

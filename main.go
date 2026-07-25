@@ -4,6 +4,8 @@ import (
 	"embed"
 	"log"
 
+	appservice "dkst-text-flow/internal/app"
+
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
@@ -11,9 +13,12 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed build/menu_icon.png
+var menuIcon []byte
+
 func main() {
 	// Create an instance of the app structure
-	app := NewApp()
+	app := appservice.New(menuIcon)
 
 	// Create application with options
 	appInst := application.New(application.Options{
@@ -52,7 +57,7 @@ func main() {
 	// Intercept macOS Dock click to show only the main window and avoid showing other windows (like AI Assist)
 	appInst.Event.RegisterApplicationEventHook(events.Mac.ApplicationShouldHandleReopen, func(event *application.ApplicationEvent) {
 		event.Cancel()
-		app.showMainWindow()
+		app.ShowMainWindow()
 	})
 
 	// Create AI prompt window

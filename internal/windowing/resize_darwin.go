@@ -1,6 +1,6 @@
 //go:build darwin
 
-package main
+package windowing
 
 /*
 #cgo CFLAGS: -x objective-c
@@ -28,6 +28,6 @@ import "C"
 
 import "github.com/wailsapp/wails/v3/pkg/application"
 
-func resizeWindowFromTop(window application.Window, width, height int) {
+func ResizeFromTop(window application.Window, width, height int) {
 	C.resizeWindowFromTop(window.NativeWindow(), C.int(width), C.int(height))
 }
