@@ -197,6 +197,16 @@ func NormalizeSettings(settings Settings) Settings {
 		settings.TTSVoice = "M1"
 	}
 	settings.TTSOSVoice = strings.TrimSpace(settings.TTSOSVoice)
+	if runtime.GOOS == "windows" {
+		switch strings.ToUpper(settings.TTSOSVoice) {
+		case "TTS_MS_KO-KR_HEAMI_11.0":
+			settings.TTSOSVoice = `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens\MSTTS_V110_koKR_HeamiM`
+		case "TTS_MS_EN-US_DAVID_11.0":
+			settings.TTSOSVoice = `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens\MSTTS_V110_enUS_DavidM`
+		case "TTS_MS_EN-US_ZIRA_11.0":
+			settings.TTSOSVoice = `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens\MSTTS_V110_enUS_ZiraM`
+		}
+	}
 
 	settings.TTSShortcut = strings.TrimSpace(settings.TTSShortcut)
 	if settings.TTSShortcut == "" {

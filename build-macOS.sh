@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_NAME="DKST Text Flow"
 APP_PATH="$ROOT_DIR/bin/$APP_NAME.app"
+ENTITLEMENTS_PATH="$ROOT_DIR/build/darwin/entitlements.plist"
 DEFAULT_IDENTITY="Apple Development: dinki@me.com (48Z2CKZS59)"
 
 usage() {
@@ -24,6 +25,14 @@ USAGE
 
 RUN_AFTER_BUILD=0
 IDENTITY="${DKST_CODESIGN_IDENTITY:-$DEFAULT_IDENTITY}"
+
+cleanup_incomplete_app() {
+  local status=$?
+  if [[ "$status" -ne 0 && -d "$APP_PATH" ]]; then
+    echo "Removing incomplete app bundle after build failure: $APP_PATH" >&2
+    rm -rf "$APP_PATH"
+  fi
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -75,17 +84,42 @@ else
   fi
 fi
 
+if [[ ! -f "$ENTITLEMENTS_PATH" ]]; then
+  echo "Entitlements file not found: $ENTITLEMENTS_PATH" >&2
+  exit 1
+fi
+
 if [[ "$IDENTITY" == "-" ]]; then
   echo "Using ad-hoc codesigning (-)."
-elif ! security find-identity -v -p codesigning | grep -Fq "\"$IDENTITY\""; then
-  echo "Codesign identity not found: $IDENTITY" >&2
-  echo "Available identities:" >&2
-  security find-identity -v -p codesigning >&2 || true
-  echo "Falling back to ad-hoc codesigning (-)." >&2
-  IDENTITY="-"
+else
+  # Resolve a certificate name to its SHA-1 hash. This avoids codesign's
+  # "ambiguous identity" error when an expired certificate has the same name.
+  RESOLVED_IDENTITY="$(
+    security find-identity -v -p codesigning |
+      sed -n 's/^[[:space:]]*[0-9][0-9]*) \([0-9A-Fa-f]\{40\}\) "\(.*\)"$/\1	\2/p' |
+      while IFS=$'\t' read -r certificate_hash certificate_name; do
+        if [[ "$IDENTITY" == "$certificate_hash" || "$IDENTITY" == "$certificate_name" ]]; then
+          printf '%s' "$certificate_hash"
+          break
+        fi
+      done
+  )"
+
+  if [[ -n "$RESOLVED_IDENTITY" ]]; then
+    echo "Using codesigning identity: $IDENTITY ($RESOLVED_IDENTITY)"
+    IDENTITY="$RESOLVED_IDENTITY"
+  else
+    echo "Valid codesign identity not found: $IDENTITY" >&2
+    echo "Available identities:" >&2
+    security find-identity -v -p codesigning >&2 || true
+    echo "Falling back to ad-hoc codesigning (-)." >&2
+    IDENTITY="-"
+  fi
 fi
 
 go test ./...
+
+trap cleanup_incomplete_app EXIT
 
 "$WAILS_BIN" package
 
@@ -106,17 +140,28 @@ xattr -cr "$APP_PATH"
 codesign \
   --force \
   --deep \
+  --options runtime \
+  --entitlements "$ENTITLEMENTS_PATH" \
   --timestamp=none \
   --sign "$IDENTITY" \
   "$APP_PATH"
 
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
+if ! codesign -d --entitlements - "$APP_PATH" 2>&1 |
+  grep -Fq "com.apple.security.cs.disable-library-validation"; then
+  echo "Required ONNX Runtime library-validation entitlement is missing." >&2
+  exit 1
+fi
+
 # Remove the standalone raw binary, leaving only the signed .app bundle
 rm -f "$ROOT_DIR/bin/$APP_NAME"
 
 # Update modification time to force macOS Finder to reload the app icon
 touch "$APP_PATH"
+
+# The app is now signed and verified. Keep it if an optional launch fails.
+trap - EXIT
 
 echo
 echo "Signed app:"

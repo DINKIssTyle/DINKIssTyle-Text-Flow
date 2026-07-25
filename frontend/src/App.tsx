@@ -423,6 +423,8 @@ function App() {
     const aiRequestRunningRef = useRef(false);
     const aiInsertionInFlightRef = useRef(false);
     const aiTTSGenerationRef = useRef(0);
+    const aiSettingsRef = useRef<AISettings | null>(null);
+    const aiSettingsSaveGenerationRef = useRef(0);
     const snippetContentRef = useRef<HTMLTextAreaElement | null>(null);
     const shortcutInputRef = useRef<HTMLInputElement | null>(null);
     const soundNameRef = useRef(noSoundName);
@@ -451,6 +453,10 @@ function App() {
         audio.load();
         soundAudioRef.current = audio;
     }, [generalSettings?.soundName]);
+
+    useEffect(() => {
+        aiSettingsRef.current = aiSettings;
+    }, [aiSettings]);
 
     const allLabel = useMemo<Label>(() => ({
         id: 0,
@@ -494,9 +500,25 @@ function App() {
     useEffect(() => {
         refresh('').catch((err) => setError(String(err)));
         GetGeneralSettings().then((settings) => setGeneralSettings(normalizeGeneralSettings(settings))).catch((err) => setError(String(err)));
-        GetAISettings().then((settings) => setAISettings(normalizeAISettings(settings))).catch((err) => setError(String(err)));
+        GetAISettings().then((settings) => {
+            const normalized = normalizeAISettings(settings);
+            aiSettingsRef.current = normalized;
+            setAISettings(normalized);
+        }).catch((err) => setError(String(err)));
         GetAIPromptSettings().then((settings) => setAIPromptSettings(normalizeAIPromptSettings(settings))).catch((err) => setError(String(err)));
     }, []);
+
+    useEffect(() => {
+        const cancel = Events.On('ai:settings-updated', (event) => {
+            if (!isHUD) {
+                return;
+            }
+            const normalized = normalizeAISettings(event.data);
+            aiSettingsRef.current = normalized;
+            setAISettings(normalized);
+        });
+        return () => cancel();
+    }, [isHUD]);
 
     useEffect(() => {
         GetTTSModelStatus().then((status) => {
@@ -513,16 +535,13 @@ function App() {
     }, []);
 
     useEffect(() => {
-        ListOSVoices()
-            .then((voices) => {
-                setOSVoices((voices || []) as OSVoiceInfo[]);
-                setOSVoicesError('');
-            })
-            .catch((err) => {
-                setOSVoices([]);
-                setOSVoicesError(String(err));
-            })
-            .finally(() => setOSVoicesLoading(false));
+        ListOSVoices().then((voices) => {
+            setOSVoices((voices || []) as OSVoiceInfo[]);
+            setOSVoicesError('');
+        }).catch((err) => {
+            setOSVoices([]);
+            setOSVoicesError(String(err));
+        }).finally(() => setOSVoicesLoading(false));
     }, []);
 
     useEffect(() => {
@@ -1117,17 +1136,59 @@ function App() {
 
     async function saveAISettings(nextSettings = aiSettings) {
         if (!nextSettings) {
-            return;
+            return null;
         }
+        const saveGeneration = aiSettingsSaveGenerationRef.current + 1;
+        aiSettingsSaveGenerationRef.current = saveGeneration;
         setAISaving(true);
         setError('');
         try {
             const saved = await SaveAISettings(nextSettings);
-            setAISettings(normalizeAISettings(saved));
+            const normalized = normalizeAISettings(saved);
+            if (saveGeneration === aiSettingsSaveGenerationRef.current) {
+                aiSettingsRef.current = normalized;
+                setAISettings(normalized);
+            }
+            return normalized;
         } catch (err) {
             setError(String(err));
+            return null;
         } finally {
-            setAISaving(false);
+            if (saveGeneration === aiSettingsSaveGenerationRef.current) {
+                setAISaving(false);
+            }
+        }
+    }
+
+    function updateAndSaveAITTSSettings(patch: Partial<AISettings>) {
+        const currentSettings = aiSettingsRef.current;
+        if (!currentSettings) {
+            return;
+        }
+        const nextSettings = {
+            ...currentSettings,
+            ...patch,
+        };
+        aiSettingsRef.current = nextSettings;
+        setAISettings(nextSettings);
+        void saveAISettings(nextSettings);
+    }
+
+    async function testTTSPlayback() {
+        const currentSettings = aiSettingsRef.current;
+        if (!currentSettings) {
+            return;
+        }
+        setError('');
+        try {
+            const normalized = await saveAISettings(currentSettings);
+            if (!normalized) {
+                return;
+            }
+            await TestSpeak("Hello! 안녕하세요. DKST Text Flow TTS 테스트입니다.", normalized);
+        } catch (err) {
+            setError(String(err));
+            alert(err);
         }
     }
 
@@ -1422,7 +1483,7 @@ function App() {
         aiRequestGenerationRef.current = requestGeneration;
         aiRequestRunningRef.current = true;
         const requestContext = { ...aiContext };
-        const requestSettings = aiSettings;
+        let requestSettings = aiSettings;
         setAIRunning(true);
         setAIResponseAction('idle');
         aiTTSGenerationRef.current += 1;
@@ -1431,6 +1492,8 @@ function App() {
         setAIResult('');
         setAIReplacement('');
         try {
+            requestSettings = normalizeAISettings(await GetAISettings());
+            setAISettings(requestSettings);
             StopSpeaking().catch(() => {});
 
             const result = await RunAIAssist({
@@ -2310,9 +2373,7 @@ function App() {
                                         <button
                                             className="tts-test-playback-btn"
                                             type="button"
-                                            onClick={() => {
-                                                TestSpeak("Hello! 안녕하세요. DKST Text Flow TTS 테스트입니다.", aiSettings).catch(err => alert(err));
-                                            }}
+                                            onClick={testTTSPlayback}
                                         >
                                             {t('testPlayback')}
                                         </button>
@@ -2355,7 +2416,7 @@ function App() {
                                                 // @ts-ignore
                                                 value={aiSettings.ttsEngine || 'os'}
                                                 // @ts-ignore
-                                                onChange={(event) => setAISettings({ ...aiSettings, ttsEngine: event.target.value })}
+                                                onChange={(event) => updateAndSaveAITTSSettings({ ttsEngine: event.target.value } as Partial<AISettings>)}
                                             >
                                                 <option value="os">{t('osTts')}</option>
                                                 <option value="supertonic3">{t('supertonic3')}</option>
@@ -2389,7 +2450,7 @@ function App() {
                                                     value={aiSettings.ttsOsVoice || ''}
                                                     disabled={osVoicesLoading}
                                                     // @ts-ignore
-                                                    onChange={(event) => setAISettings({ ...aiSettings, ttsOsVoice: event.target.value })}
+                                                    onChange={(event) => updateAndSaveAITTSSettings({ ttsOsVoice: event.target.value } as Partial<AISettings>)}
                                                 >
                                                     <option value="">
                                                         {osVoicesLoading ? t('loadingOsVoices') : t('systemDefaultVoice')}

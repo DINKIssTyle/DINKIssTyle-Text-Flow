@@ -231,10 +231,10 @@ tasks:
       - rm -rf "{{.BIN_DIR}}/{{.APP_NAME}}.dnt"
 
   codesign:adhoc:
-    summary: Ad-hoc signs the app bundle (macOS only)
+    summary: Ad-hoc signs the app bundle while preserving distribution entitlements
     internal: true
     cmds:
-      - codesign --force --deep --sign - "{{.BIN_DIR}}/{{.APP_NAME}}.app"
+      - codesign --force --deep --entitlements build/darwin/entitlements.plist --sign - "{{.BIN_DIR}}/{{.APP_NAME}}.app"
 
   codesign:skip:
     summary: Skips codesigning when cross-compiling
@@ -264,12 +264,13 @@ tasks:
     summary: Signs the application bundle with Developer ID
     desc: |
       Signs the .app bundle for distribution.
+      Allows the downloaded ONNX Runtime dylib to load under Hardened Runtime.
       Uses signing identity from `wails3 setup` (stored in ~/.config/wails/defaults.yaml).
       Override with: task darwin:sign -- --identity "Developer ID Application: ..."
     deps:
       - task: package
     cmds:
-      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.app" {{.CLI_ARGS}}
+      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.app" --entitlements build/darwin/entitlements.plist {{.CLI_ARGS}}
 
   sign:notarize:
     summary: Signs and notarizes the application bundle
@@ -282,4 +283,4 @@ tasks:
     deps:
       - task: package
     cmds:
-      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.app" --notarize {{.CLI_ARGS}}
+      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.app" --entitlements build/darwin/entitlements.plist --notarize {{.CLI_ARGS}}

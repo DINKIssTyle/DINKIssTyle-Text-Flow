@@ -86,6 +86,7 @@ type App struct {
 	expansionSoundStopper   context.CancelFunc
 	ttsCmd                  *exec.Cmd
 	ttsMu                   sync.Mutex
+	aiSettingsMu            sync.Mutex
 	trayManager             *tray.Manager
 	supertonicEngine        *ai.SupertonicEngine
 	supertonicEngineMu      sync.Mutex
@@ -443,6 +444,9 @@ func enclosingAppBundlePath(path string) string {
 }
 
 func (a *App) GetAISettings() (ai.Settings, error) {
+	a.aiSettingsMu.Lock()
+	defer a.aiSettingsMu.Unlock()
+
 	settings := ai.DefaultSettings()
 	if a.store == nil {
 		return settings, nil
@@ -459,6 +463,9 @@ func (a *App) GetAISettings() (ai.Settings, error) {
 }
 
 func (a *App) SaveAISettings(settings ai.Settings) (ai.Settings, error) {
+	a.aiSettingsMu.Lock()
+	defer a.aiSettingsMu.Unlock()
+
 	if a.store == nil {
 		return ai.Settings{}, errors.New("storage is not ready")
 	}
@@ -468,6 +475,9 @@ func (a *App) SaveAISettings(settings ai.Settings) (ai.Settings, error) {
 		return ai.Settings{}, err
 	}
 	a.configureAIHotkeyWithSettings(normalized)
+	if appInst := application.Get(); appInst != nil {
+		appInst.Event.Emit("ai:settings-updated", normalized)
+	}
 	return normalized, nil
 }
 
