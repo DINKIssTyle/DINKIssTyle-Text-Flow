@@ -13,5 +13,6 @@ export interface Status {
     "activeAppName": string;
     "activeBundleId": string;
     "flowEngineRunning": boolean;
+    "flowPaused": boolean;
     "message": string;
 }

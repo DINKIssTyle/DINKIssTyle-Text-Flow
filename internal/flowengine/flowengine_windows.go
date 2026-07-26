@@ -32,6 +32,7 @@ type engine struct {
 	suppressInput bool
 	typingCount   int64
 	typingFlush   bool
+	generation    uint64
 	hook          uintptr
 	threadID      uint32
 }
@@ -151,6 +152,7 @@ func Stop() {
 
 	keyboardEngine.mu.Lock()
 	keyboardEngine.running = false
+	keyboardEngine.generation++
 	keyboardEngine.hook = 0
 	keyboardEngine.threadID = 0
 	keyboardEngine.matcher.Reset()
@@ -180,6 +182,7 @@ func runKeyboardHook(started chan<- bool) {
 	keyboardEngine.hook = hook
 	keyboardEngine.threadID = uint32(threadID)
 	keyboardEngine.running = true
+	keyboardEngine.generation++
 	keyboardEngine.mu.Unlock()
 	started <- true
 
@@ -192,6 +195,9 @@ func runKeyboardHook(started chan<- bool) {
 	}
 
 	keyboardEngine.mu.Lock()
+	if keyboardEngine.running {
+		keyboardEngine.generation++
+	}
 	keyboardEngine.running = false
 	keyboardEngine.hook = 0
 	keyboardEngine.threadID = 0
@@ -292,8 +298,12 @@ func handleKeyboardInput(input keyboardInput) {
 	}
 
 	keyboardEngine.mu.Lock()
+	generation := keyboardEngine.generation
 	onExpansion := keyboardEngine.onExpansion
 	keyboardEngine.mu.Unlock()
+	if !executionActive(generation) {
+		return
+	}
 	if onExpansion != nil {
 		onExpansion(match.Snippet)
 	}
@@ -307,17 +317,22 @@ func handleKeyboardInput(input keyboardInput) {
 	keyboardEngine.mu.Lock()
 	keyboardEngine.suppressInput = true
 	keyboardEngine.mu.Unlock()
-	go func(snippet storage.Snippet, count int) {
+	go func(snippet storage.Snippet, count int, generation uint64) {
 		defer func() {
 			keyboardEngine.mu.Lock()
 			keyboardEngine.suppressInput = false
 			keyboardEngine.mu.Unlock()
 		}()
+		if !executionActive(generation) {
+			return
+		}
 		postBackspaces(count)
 		time.Sleep(backspaceSettleDuration(count))
-		executeSnippetActions(renderSnippetActions(snippet.Content), snippet.UsePaste)
+		if !executeSnippetActions(renderSnippetActions(snippet.Content), snippet.UsePaste, generation) {
+			return
+		}
 		_ = store.LogExpansion(snippet.ID, "")
-	}(match.Snippet, deleteCount)
+	}(match.Snippet, deleteCount, generation)
 }
 
 func keyText(event *kbdllhookstruct) string {
@@ -457,8 +472,11 @@ type snippetAction struct {
 	keyCode uintptr
 }
 
-func executeSnippetActions(actions []snippetAction, usePaste bool) {
+func executeSnippetActions(actions []snippetAction, usePaste bool, generation uint64) bool {
 	for _, action := range actions {
+		if !executionActive(generation) {
+			return false
+		}
 		if action.text != "" {
 			pasteText(action.text)
 			time.Sleep(24 * time.Millisecond)
@@ -469,6 +487,13 @@ func executeSnippetActions(actions []snippetAction, usePaste bool) {
 			time.Sleep(12 * time.Millisecond)
 		}
 	}
+	return executionActive(generation)
+}
+
+func executionActive(generation uint64) bool {
+	keyboardEngine.mu.Lock()
+	defer keyboardEngine.mu.Unlock()
+	return keyboardEngine.running && keyboardEngine.generation == generation
 }
 
 func renderSnippetActions(content string) []snippetAction {

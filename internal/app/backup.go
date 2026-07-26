@@ -99,7 +99,7 @@ func backupStrings(language string) backupDialogStrings {
 	}
 }
 
-// BackupSnippetsAndAIPrompts writes a JSON backup with the proprietary .DTF
+// BackupSnippetsAndAIPrompts writes a JSON backup with the proprietary .dtf
 // extension. It returns false when the save dialog is cancelled.
 func (a *App) BackupSnippetsAndAIPrompts(language string) (bool, error) {
 	if a.store == nil {
@@ -163,7 +163,7 @@ func (a *App) BackupSnippetsAndAIPrompts(language string) (bool, error) {
 	data = append(data, '\n')
 
 	text := backupStrings(language)
-	defaultFilename := fmt.Sprintf("DKST-Text-Flow-Backup-%s.DTF", time.Now().Format("2006-01-02"))
+	defaultFilename := fmt.Sprintf("DKST-Text-Flow-Backup-%s.dtf", time.Now().Format("2006-01-02"))
 	saveDialog := application.Get().Dialog.SaveFile()
 	saveDialog.SetOptions(&application.SaveFileDialogOptions{
 		CanCreateDirectories: true,
@@ -173,8 +173,8 @@ func (a *App) BackupSnippetsAndAIPrompts(language string) (bool, error) {
 		Filename:             defaultFilename,
 		ButtonText:           text.exportButton,
 		Filters: []application.FileFilter{{
-			DisplayName: text.fileDescription + " (*.DTF)",
-			Pattern:     "*.DTF",
+			DisplayName: text.fileDescription + " (*.dtf)",
+			Pattern:     "*.dtf",
 		}},
 	})
 	path, err := saveDialog.PromptForSingleSelection()
@@ -185,16 +185,22 @@ func (a *App) BackupSnippetsAndAIPrompts(language string) (bool, error) {
 	if path == "" {
 		return false, nil
 	}
-	if !strings.EqualFold(filepath.Ext(path), ".dtf") {
-		path += ".DTF"
-	}
+	path = lowercaseBackupPath(path)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return false, fmt.Errorf("write backup: %w", err)
 	}
 	return true, nil
 }
 
-// ImportSnippetsAndAIPrompts validates and then atomically restores a .DTF
+func lowercaseBackupPath(path string) string {
+	extension := filepath.Ext(path)
+	if strings.EqualFold(extension, ".dtf") {
+		return strings.TrimSuffix(path, extension) + ".dtf"
+	}
+	return path + ".dtf"
+}
+
+// ImportSnippetsAndAIPrompts validates and then atomically restores a .dtf
 // backup. It returns false when either dialog is cancelled.
 func (a *App) ImportSnippetsAndAIPrompts(language string) (bool, error) {
 	if a.store == nil {
@@ -206,7 +212,7 @@ func (a *App) ImportSnippetsAndAIPrompts(language string) (bool, error) {
 		SetTitle(text.importTitle).
 		SetMessage(text.importMessage).
 		SetButtonText(text.importButton).
-		AddFilter(text.fileDescription+" (*.DTF)", "*.DTF;*.dtf").
+		AddFilter(text.fileDescription+" (*.dtf)", "*.dtf;*.DTF").
 		AllowsOtherFileTypes(false).
 		PromptForSingleSelection()
 	if err != nil {

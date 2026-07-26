@@ -6,6 +6,7 @@ type Status struct {
 	ActiveAppName        string `json:"activeAppName"`
 	ActiveBundleID       string `json:"activeBundleId"`
 	FlowEngineRunning    bool   `json:"flowEngineRunning"`
+	FlowPaused           bool   `json:"flowPaused"`
 	Message              string `json:"message"`
 }
 

@@ -36,9 +36,8 @@ import {
     ReplaceSelectedText,
     ResizeAIPromptWindow,
     RunAIAssist,
-    SaveAISettings,
+    SaveApplicationSettings,
     SaveCommonAIPromptRule,
-    SaveGeneralSettings,
     Speak,
     TestSpeak,
     StopSpeaking,
@@ -69,8 +68,6 @@ const aiHUDCollapsedHeight = 74;
 const aiHUDMaxHeight = 420;
 const isMacOS = System.IsMac();
 const isWindows = System.IsWindows();
-const defaultAIHotkey = isMacOS ? 'Cmd+Shift+Space' : 'Ctrl+Shift+Space';
-const defaultTTSHotkey = isMacOS ? 'Cmd+Shift+T' : 'Ctrl+Shift+T';
 
 const emptyInput: SnippetInput = {
     labelId: 0,
@@ -217,6 +214,17 @@ function displayHotkey(value: string) {
         .replace(/\bOption\b/gi, 'Alt');
 }
 
+function normalizedHotkey(value: string) {
+    return value.trim().toLowerCase();
+}
+
+function hasDuplicateHotkeys(general: GeneralSettings, settings: AISettings) {
+    const values = [general.flowToggleHotkey, settings.hotkey, settings.ttsShortcut]
+        .map((value) => normalizedHotkey(value || ''))
+        .filter(Boolean);
+    return new Set(values).size !== values.length;
+}
+
 function keyLabelFromKeyboardEvent(event: KeyboardEvent): string {
     if (event.code.startsWith('Key')) {
         return event.code.slice(3).toUpperCase();
@@ -228,6 +236,63 @@ function keyLabelFromKeyboardEvent(event: KeyboardEvent): string {
         return event.code.slice(6);
     }
     return hotkeyCodeLabels[event.code] ?? (event.key.length === 1 ? event.key.toUpperCase() : event.key);
+}
+
+type HotkeyCaptureControlProps = {
+    value: string;
+    recording: boolean;
+    onStart: () => void;
+    onStop: () => void;
+    onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+    onClear: () => void;
+    t: Translator;
+};
+
+function HotkeyCaptureControl({ value, recording, onStart, onStop, onKeyDown, onClear, t }: HotkeyCaptureControlProps) {
+    return (
+        <div className={"hotkey-control" + (value ? " has-value" : "")}>
+            <button
+                type="button"
+                className={"hotkey-capture" + (recording ? " recording" : "")}
+                onClick={(event) => {
+                    onStart();
+                    event.currentTarget.focus();
+                }}
+                onBlur={onStop}
+                onKeyDown={onKeyDown}
+            >
+                {recording ? t("pressShortcut") : displayHotkey(value || t("recordShortcut"))}
+            </button>
+            {value && (
+                <button
+                    type="button"
+                    className="hotkey-clear"
+                    onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onClear();
+                    }}
+                    aria-label={t("clearShortcut")}
+                    title={t("clearShortcut")}
+                >
+                    <span aria-hidden="true">×</span>
+                </button>
+            )}
+        </div>
+    );
+}
+
+function flowStatusDetail(status: PlatformStatus | null, t: Translator) {
+    if (status?.flowPaused) {
+        return t('flowPausedByToggle');
+    }
+    if (!status?.accessibilityTrusted) {
+        return t('permissionPending');
+    }
+    if (!status?.flowEngineRunning) {
+        return t('flowEngineUnavailable');
+    }
+    return t('accessibilityReady');
 }
 
 function aiStatusLabel(elapsedMs: number, t: Translator) {
@@ -391,6 +456,7 @@ function App() {
     const [form, setForm] = useState<SnippetInput>(emptyInput);
     const [labelForm, setLabelForm] = useState<LabelInput>(emptyLabelInput);
     const [error, setError] = useState('');
+    const [saveToast, setSaveToast] = useState<{ id: number; message: string } | null>(null);
     const [shortcutWarning, setShortcutWarning] = useState('');
     const [pastePreferenceTouched, setPastePreferenceTouched] = useState(false);
     const [pasteWarning, setPasteWarning] = useState('');
@@ -406,6 +472,7 @@ function App() {
     const [aiTTSSynthesizing, setAITTSSynthesizing] = useState(false);
     const [recordingHotkey, setRecordingHotkey] = useState(false);
     const [recordingTtsHotkey, setRecordingTtsHotkey] = useState(false);
+    const [recordingFlowToggleHotkey, setRecordingFlowToggleHotkey] = useState(false);
     const [hasBeenInvoked, setHasBeenInvoked] = useState(false);
     const [aiContext, setAIContext] = useState<AIInvocationContext>({
         kind: 'none',
@@ -429,6 +496,7 @@ function App() {
     const aiSettingsRef = useRef<AISettings | null>(null);
     const savedGeneralSettingsRef = useRef<GeneralSettings | null>(null);
     const savedAISettingsRef = useRef<AISettings | null>(null);
+    const saveToastSequenceRef = useRef(0);
     const snippetContentRef = useRef<HTMLTextAreaElement | null>(null);
     const shortcutInputRef = useRef<HTMLInputElement | null>(null);
     const soundNameRef = useRef(noSoundName);
@@ -444,6 +512,23 @@ function App() {
 
     const language = (generalSettings?.language ?? 'en') as Language;
     const t = useMemo(() => createTranslator(language), [language]);
+
+    useEffect(() => {
+        if (!saveToast) {
+            return;
+        }
+        const timeout = window.setTimeout(() => setSaveToast(null), 2600);
+        return () => window.clearTimeout(timeout);
+    }, [saveToast]);
+
+    function showSaveToast(message: string) {
+        saveToastSequenceRef.current += 1;
+        setError('');
+        setSaveToast({
+            id: saveToastSequenceRef.current,
+            message,
+        });
+    }
 
     useEffect(() => {
         const soundName = generalSettings?.soundName || noSoundName;
@@ -515,6 +600,13 @@ function App() {
             setAISettings(normalized);
         }).catch((err) => setError(String(err)));
         GetAIPromptSettings().then((settings) => setAIPromptSettings(normalizeAIPromptSettings(settings))).catch((err) => setError(String(err)));
+    }, []);
+
+    useEffect(() => {
+        const cancel = Events.On('flow:status-changed', (event) => {
+            setPlatformStatus(event.data as PlatformStatus);
+        });
+        return () => cancel();
     }, []);
 
     useEffect(() => {
@@ -818,6 +910,7 @@ function App() {
 
     async function submitSnippet(event: FormEvent) {
         event.preventDefault();
+        setSaveToast(null);
         setError('');
         if (hasUnsupportedShortcutCharacters(form.shortcut)) {
             setShortcutWarning('Shortcuts support only Roman letters, numbers, and symbols.');
@@ -832,6 +925,7 @@ function App() {
             setSelectedID(saved.id);
             setDetailMode('snippet');
             await refresh();
+            showSaveToast(t('snippetSaved'));
         } catch (err) {
             if (isDuplicateShortcutError(err)) {
                 setShortcutWarning('This shortcut is already in use.');
@@ -870,10 +964,13 @@ function App() {
         if (!selectedLabel) {
             return;
         }
+        setSaveToast(null);
+        setError('');
         try {
             const label = await UpdateLabel(selectedLabel.id, labelForm);
             setLabels((current) => current.map((item) => item.id === label.id ? label : item));
             await refresh(query, selectedLabelID);
+            showSaveToast(t('labelSaved'));
         } catch (err) {
             setError(String(err));
         }
@@ -1005,7 +1102,7 @@ function App() {
         await Window.Hide();
     }
 
-    function normalizeGeneralSettings(settings: { themeMode?: string; language?: string; typingTrendEnabled?: boolean; startAtLogin?: boolean; soundName?: string } = {}): GeneralSettings {
+    function normalizeGeneralSettings(settings: { themeMode?: string; language?: string; typingTrendEnabled?: boolean; startAtLogin?: boolean; soundName?: string; flowToggleHotkey?: string } = {}): GeneralSettings {
         const themeMode = settings.themeMode === 'light' || settings.themeMode === 'dark' ? settings.themeMode : 'auto';
         const soundName = settings.soundName && soundOptions.includes(settings.soundName)
             ? settings.soundName
@@ -1016,6 +1113,7 @@ function App() {
             typingTrendEnabled: settings.typingTrendEnabled !== false,
             startAtLogin: settings.startAtLogin === true,
             soundName,
+            flowToggleHotkey: settings.flowToggleHotkey || '',
         };
     }
 
@@ -1085,7 +1183,7 @@ function App() {
             model: settings?.model || '',
             apiKey: settings?.apiKey || '',
             temperature: Number(settings?.temperature ?? 0),
-            hotkey: settings?.hotkey || defaultAIHotkey,
+            hotkey: settings?.hotkey || '',
             useSelectedText: settings?.useSelectedText ?? true,
             useSelectedFile: !!settings?.useSelectedFile,
             replaceSelectedText: settings?.replaceSelectedText ?? true,
@@ -1099,7 +1197,7 @@ function App() {
             ttsOsVoice: settings?.ttsOsVoice || '',
             ttsUseAiResponse: !!settings?.ttsUseAiResponse,
             ttsUseShortcut: !!settings?.ttsUseShortcut,
-            ttsShortcut: settings?.ttsShortcut || defaultTTSHotkey,
+            ttsShortcut: settings?.ttsShortcut || '',
             ttsSpeed: settings?.ttsSpeed || 1.05,
             ttsSteps: settings?.ttsSteps || 8,
         } as any;
@@ -1120,31 +1218,29 @@ function App() {
         if (!generalSettings || !aiSettings) {
             return;
         }
+        setSaveToast(null);
+        if (hasDuplicateHotkeys(generalSettings, aiSettings)) {
+            setError(t('hotkeyAlreadyAssigned'));
+            return;
+        }
+
         setSettingsSaving(true);
         setError('');
-
-        const [generalResult, aiResult] = await Promise.allSettled([
-            SaveGeneralSettings(generalSettings),
-            SaveAISettings(aiSettings),
-        ]);
-
-        if (generalResult.status === 'fulfilled') {
-            const normalized = normalizeGeneralSettings(generalResult.value);
-            savedGeneralSettingsRef.current = normalized;
-            setGeneralSettings(normalized);
+        try {
+            const result = await SaveApplicationSettings(generalSettings, aiSettings);
+            const normalizedGeneral = normalizeGeneralSettings(result.general);
+            const normalizedAI = normalizeAISettings(result.ai);
+            savedGeneralSettingsRef.current = normalizedGeneral;
+            savedAISettingsRef.current = normalizedAI;
+            aiSettingsRef.current = normalizedAI;
+            setGeneralSettings(normalizedGeneral);
+            setAISettings(normalizedAI);
+            showSaveToast(createTranslator(normalizeLanguage(normalizedGeneral.language))('settingsSaved'));
+        } catch (err) {
+            setError(String(err));
+        } finally {
+            setSettingsSaving(false);
         }
-        if (aiResult.status === 'fulfilled') {
-            const normalized = normalizeAISettings(aiResult.value);
-            savedAISettingsRef.current = normalized;
-            aiSettingsRef.current = normalized;
-            setAISettings(normalized);
-        }
-
-        const failedResult = [generalResult, aiResult].find((result) => result.status === 'rejected');
-        if (failedResult?.status === 'rejected') {
-            setError(String(failedResult.reason));
-        }
-        setSettingsSaving(false);
     }
 
     function cancelSettingsChanges() {
@@ -1158,6 +1254,7 @@ function App() {
         }
         setRecordingHotkey(false);
         setRecordingTtsHotkey(false);
+        setRecordingFlowToggleHotkey(false);
         setError('');
     }
 
@@ -1234,11 +1331,13 @@ function App() {
         if (!aiPromptSettings) {
             return;
         }
+        setSaveToast(null);
         setPromptSaving(true);
         setError('');
         try {
             const saved = await SaveCommonAIPromptRule(aiPromptSettings.common);
             setAIPromptSettings(normalizeAIPromptSettings(saved));
+            showSaveToast(t('aiPromptSaved'));
         } catch (err) {
             setError(String(err));
         } finally {
@@ -1267,6 +1366,7 @@ function App() {
     }
 
     async function savePromptProfile(profile: AIPromptProfile) {
+        setSaveToast(null);
         setPromptSaving(true);
         setError('');
         try {
@@ -1279,6 +1379,7 @@ function App() {
                 noSelectionPrompt: profile.noSelectionPrompt,
             });
             setAIPromptSettings(normalizeAIPromptSettings(saved));
+            showSaveToast(t('aiPromptSaved'));
         } catch (err) {
             setError(String(err));
         } finally {
@@ -1623,6 +1724,21 @@ function App() {
         runAIPrompt();
     }
 
+    function hotkeyIsUsedByAnother(nextHotkey: string, field: 'flow' | 'prompt' | 'tts') {
+        if (!generalSettings || !aiSettings) {
+            return false;
+        }
+        const candidate = normalizedHotkey(nextHotkey);
+        const assigned = {
+            flow: generalSettings.flowToggleHotkey,
+            prompt: aiSettings.hotkey,
+            tts: aiSettings.ttsShortcut,
+        };
+        return Object.entries(assigned).some(([name, value]) =>
+            name !== field && normalizedHotkey(value || '') === candidate,
+        );
+    }
+
     function captureHotkey(event: KeyboardEvent<HTMLButtonElement>) {
         if (!recordingHotkey || !aiSettings) {
             return;
@@ -1639,8 +1755,38 @@ function App() {
         if (!nextHotkey) {
             return;
         }
+        if (hotkeyIsUsedByAnother(nextHotkey, 'prompt')) {
+            setError(t('hotkeyAlreadyAssigned'));
+            return;
+        }
+        setError('');
         setAISettings({ ...aiSettings, hotkey: nextHotkey });
         setRecordingHotkey(false);
+    }
+
+    function captureFlowToggleHotkey(event: KeyboardEvent<HTMLButtonElement>) {
+        if (!recordingFlowToggleHotkey || !generalSettings) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (event.key === 'Escape') {
+            setRecordingFlowToggleHotkey(false);
+            return;
+        }
+
+        const nextHotkey = formatCapturedHotkey(event);
+        if (!nextHotkey) {
+            return;
+        }
+        if (hotkeyIsUsedByAnother(nextHotkey, 'flow')) {
+            setError(t('hotkeyAlreadyAssigned'));
+            return;
+        }
+        setError('');
+        updateGeneralSettings({ flowToggleHotkey: nextHotkey });
+        setRecordingFlowToggleHotkey(false);
     }
 
     function captureTtsHotkey(event: KeyboardEvent<HTMLButtonElement>) {
@@ -1659,9 +1805,13 @@ function App() {
         if (!nextHotkey) {
             return;
         }
+        if (hotkeyIsUsedByAnother(nextHotkey, 'tts')) {
+            setError(t('hotkeyAlreadyAssigned'));
+            return;
+        }
+        setError('');
         setAISettings({
             ...aiSettings,
-            // @ts-ignore
             ttsShortcut: nextHotkey,
         });
         setRecordingTtsHotkey(false);
@@ -1713,7 +1863,7 @@ function App() {
                     <span className={platformStatus?.flowEngineRunning ? 'dot good' : 'dot idle'} />
                     <div>
                         <strong>{platformStatus?.flowEngineRunning ? t('flowActive') : t('flowPaused')}</strong>
-                        <span>{platformStatus?.accessibilityTrusted ? t('accessibilityReady') : t('permissionPending')}</span>
+                        <span>{flowStatusDetail(platformStatus, t)}</span>
                     </div>
                 </div>
             </aside>}
@@ -2229,6 +2379,25 @@ function App() {
                                                 </select>
                                             </label>
                                             <label>
+                                                {t('flowToggleHotkey')}
+                                                <HotkeyCaptureControl
+                                                    value={generalSettings.flowToggleHotkey}
+                                                    recording={recordingFlowToggleHotkey}
+                                                    onStart={() => {
+                                                        setError("");
+                                                        setRecordingFlowToggleHotkey(true);
+                                                    }}
+                                                    onStop={() => setRecordingFlowToggleHotkey(false)}
+                                                    onKeyDown={captureFlowToggleHotkey}
+                                                    onClear={() => {
+                                                        setError("");
+                                                        setRecordingFlowToggleHotkey(false);
+                                                        updateGeneralSettings({ flowToggleHotkey: "" });
+                                                    }}
+                                                    t={t}
+                                                />
+                                            </label>
+                                            <label>
                                                 {t('sound')}
                                                 <select
                                                     value={generalSettings.soundName}
@@ -2297,18 +2466,22 @@ function App() {
                                         </label>
                                         <label>
                                             {t('promptHotkey')}
-                                            <button
-                                                className={`hotkey-capture ${recordingHotkey ? 'recording' : ''}`}
-                                                type="button"
-                                                onClick={(event) => {
+                                            <HotkeyCaptureControl
+                                                value={aiSettings.hotkey}
+                                                recording={recordingHotkey}
+                                                onStart={() => {
+                                                    setError("");
                                                     setRecordingHotkey(true);
-                                                    event.currentTarget.focus();
                                                 }}
-                                                onBlur={() => setRecordingHotkey(false)}
+                                                onStop={() => setRecordingHotkey(false)}
                                                 onKeyDown={captureHotkey}
-                                            >
-                                                {recordingHotkey ? t('pressShortcut') : displayHotkey(aiSettings.hotkey || t('recordShortcut'))}
-                                            </button>
+                                                onClear={() => {
+                                                    setError("");
+                                                    setRecordingHotkey(false);
+                                                    setAISettings({ ...aiSettings, hotkey: "" });
+                                                }}
+                                                t={t}
+                                            />
                                         </label>
                                     </div>
                                     {aiSettings.provider === 'apple_intelligence' ? (
@@ -2450,19 +2623,22 @@ function App() {
                                         </label>
                                         <label>
                                             {t('ttsShortcut')}
-                                            <button
-                                                className={`hotkey-capture ${recordingTtsHotkey ? 'recording' : ''}`}
-                                                type="button"
-                                                onClick={(event) => {
+                                            <HotkeyCaptureControl
+                                                value={aiSettings.ttsShortcut}
+                                                recording={recordingTtsHotkey}
+                                                onStart={() => {
+                                                    setError("");
                                                     setRecordingTtsHotkey(true);
-                                                    event.currentTarget.focus();
                                                 }}
-                                                onBlur={() => setRecordingTtsHotkey(false)}
+                                                onStop={() => setRecordingTtsHotkey(false)}
                                                 onKeyDown={captureTtsHotkey}
-                                            >
-                                                {/* @ts-ignore */}
-                                                {recordingTtsHotkey ? t('pressShortcut') : displayHotkey(aiSettings.ttsShortcut || t('recordShortcut'))}
-                                            </button>
+                                                onClear={() => {
+                                                    setError("");
+                                                    setRecordingTtsHotkey(false);
+                                                    setAISettings({ ...aiSettings, ttsShortcut: "" });
+                                                }}
+                                                t={t}
+                                            />
                                         </label>
                                     </div>
 
@@ -2649,7 +2825,14 @@ function App() {
                     </section>
                 )}
 
-                {error && <div className="toast">{error}</div>}
+                {error ? (
+                    <div className="toast" role="alert">{error}</div>
+                ) : saveToast && (
+                    <div key={saveToast.id} className="toast success" role="status" aria-live="polite">
+                        <span className="material-symbols-rounded" aria-hidden="true">check_circle</span>
+                        <span>{saveToast.message}</span>
+                    </div>
+                )}
             </main>
 
             {isModalOpen && (
@@ -2778,16 +2961,32 @@ function TypingChart({ history, enabled, t }: { history: DailyTypingStat[]; enab
                 </div>
             </div>
             <div className="typing-bars" aria-label={t('typingTrendDescription')}>
-                {history.map((day) => {
+                {history.map((day, index) => {
                     const height = Math.max(3, Math.round((day.count / maxCount) * 100));
+                    const edgeClass = index < 8
+                        ? ' tooltip-align-start'
+                        : index >= history.length - 8
+                            ? ' tooltip-align-end'
+                            : '';
                     return (
                         <span
                             key={day.date}
-                            className="typing-bar"
+                            className={`typing-bar${edgeClass}`}
                             style={{ height: `${height}%` }}
-                            title={`${day.date}: ${formatCount(day.count)}`}
                             aria-label={`${day.date}: ${formatCount(day.count)}`}
-                        />
+                            tabIndex={enabled ? 0 : -1}
+                        >
+                            <span className="typing-bar-tooltip" role="tooltip">
+                                <span className="typing-tooltip-row">
+                                    <span>{t('typingTooltipDate')}</span>
+                                    <strong>{day.date}</strong>
+                                </span>
+                                <span className="typing-tooltip-row">
+                                    <span>{t('typingTooltipInputCount')}</span>
+                                    <strong>{formatCount(day.count)}</strong>
+                                </span>
+                            </span>
+                        </span>
                     );
                 })}
                 {!enabled && (

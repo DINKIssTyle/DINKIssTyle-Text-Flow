@@ -229,20 +229,20 @@ RequestExecutionLevel "${REQUEST_EXECUTION_LEVEL}"
 !macroend
 
 !macro wails.associateFiles
-    ; Register only the .DTF document icon. Intentionally omit a ProgID and
+    ; Register only the .dtf document icon. Intentionally omit a ProgID and
     ; open verb so double-clicking a backup never launches the application.
-    WriteRegStr SHELL_CONTEXT "Software\Classes\.DTF" "Content Type" "application/json"
-    WriteRegStr SHELL_CONTEXT "Software\Classes\.DTF\DefaultIcon" "" "$INSTDIR\docicon.ico"
+    WriteRegStr SHELL_CONTEXT "Software\Classes\.dtf" "Content Type" "application/json"
+    WriteRegStr SHELL_CONTEXT "Software\Classes\.dtf\DefaultIcon" "" "$INSTDIR\docicon.ico"
     System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 !macroend
 
 !macro wails.unassociateFiles
     ; Remove the icon only when it still points at this installation.
-    ReadRegStr $R0 SHELL_CONTEXT "Software\Classes\.DTF\DefaultIcon" ""
+    ReadRegStr $R0 SHELL_CONTEXT "Software\Classes\.dtf\DefaultIcon" ""
     StrCmp $R0 "$INSTDIR\docicon.ico" 0 wails_dtf_icon_done
-    DeleteRegKey SHELL_CONTEXT "Software\Classes\.DTF\DefaultIcon"
-    DeleteRegValue SHELL_CONTEXT "Software\Classes\.DTF" "Content Type"
-    DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\.DTF"
+    DeleteRegKey SHELL_CONTEXT "Software\Classes\.dtf\DefaultIcon"
+    DeleteRegValue SHELL_CONTEXT "Software\Classes\.dtf" "Content Type"
+    DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\.dtf"
     System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
     wails_dtf_icon_done:
 !macroend

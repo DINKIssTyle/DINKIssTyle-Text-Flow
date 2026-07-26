@@ -16,9 +16,12 @@ var assets embed.FS
 //go:embed build/menu_icon.png
 var menuIcon []byte
 
+//go:embed build/menu_icon_paused.png
+var pausedMenuIcon []byte
+
 func main() {
 	// Create an instance of the app structure
-	app := appservice.New(menuIcon)
+	app := appservice.New(menuIcon, pausedMenuIcon)
 
 	// Create application with options
 	appInst := application.New(application.Options{

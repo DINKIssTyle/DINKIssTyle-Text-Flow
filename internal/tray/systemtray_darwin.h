@@ -1,7 +1,9 @@
 #ifndef DKST_SYSTEMTRAY_DARWIN_H
 #define DKST_SYSTEMTRAY_DARWIN_H
 
-void *dkstSystemTrayCreate(const unsigned char *iconBytes, int iconLength);
+void *dkstSystemTrayCreate(const unsigned char *activeIconBytes, int activeIconLength,
+                           const unsigned char *pausedIconBytes, int pausedIconLength);
+void dkstSystemTrayUpdateState(void *tray, int flowPaused, int running);
 void dkstSystemTrayDestroy(void *tray);
 
 #endif

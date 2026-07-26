@@ -44,6 +44,7 @@ type engine struct {
 	suppressInput bool
 	typingCount   int64
 	typingFlush   bool
+	generation    uint64
 }
 
 var keyboardEngine = &engine{matcher: flow.NewMatcher(96)}
@@ -57,11 +58,19 @@ func SetExpansionHandler(handler func(storage.Snippet)) {
 func Start(store Store) bool {
 	keyboardEngine.mu.Lock()
 	keyboardEngine.store = store
+	keyboardEngine.matcher.Reset()
+	if keyboardEngine.running {
+		keyboardEngine.mu.Unlock()
+		return true
+	}
 	keyboardEngine.mu.Unlock()
 
 	started := C.DKSTStartKeyboardTap() == 1
 	keyboardEngine.mu.Lock()
 	keyboardEngine.running = started
+	if started {
+		keyboardEngine.generation++
+	}
 	keyboardEngine.mu.Unlock()
 	return started
 }
@@ -71,6 +80,9 @@ func Stop() {
 	flushTypingCount()
 	keyboardEngine.mu.Lock()
 	keyboardEngine.running = false
+	keyboardEngine.generation++
+	keyboardEngine.matcher.Reset()
+	keyboardEngine.suppressInput = false
 	keyboardEngine.mu.Unlock()
 }
 
@@ -83,12 +95,13 @@ func Running() bool {
 //export DKSTKeyboardInput
 func DKSTKeyboardInput(value *C.char, backspace C.int) {
 	keyboardEngine.mu.Lock()
-	if keyboardEngine.suppressInput {
+	if keyboardEngine.suppressInput || !keyboardEngine.running {
 		keyboardEngine.mu.Unlock()
 		return
 	}
 	store := keyboardEngine.store
 	matcher := keyboardEngine.matcher
+	generation := keyboardEngine.generation
 	keyboardEngine.mu.Unlock()
 	if store == nil {
 		return
@@ -129,6 +142,9 @@ func DKSTKeyboardInput(value *C.char, backspace C.int) {
 		return
 	}
 
+	if !executionActive(generation) {
+		return
+	}
 	keyboardEngine.mu.Lock()
 	onExpansion := keyboardEngine.onExpansion
 	keyboardEngine.mu.Unlock()
@@ -142,9 +158,14 @@ func DKSTKeyboardInput(value *C.char, backspace C.int) {
 		deleteCount += len([]rune(text))
 	}
 
+	if !executionActive(generation) {
+		return
+	}
 	C.DKSTPostBackspaces(C.int(deleteCount))
 	time.Sleep(backspaceSettleDuration(deleteCount))
-	executeSnippetActions(renderSnippetActions(match.Snippet.Content), match.Snippet.UsePaste)
+	if !executeSnippetActions(renderSnippetActions(match.Snippet.Content), match.Snippet.UsePaste, generation) {
+		return
+	}
 	_ = store.LogExpansion(match.Snippet.ID, "")
 }
 
@@ -263,7 +284,10 @@ type snippetAction struct {
 
 var snippetTagPattern = regexp.MustCompile(`\{\{([^{}]+)\}\}`)
 
-func executeSnippetActions(actions []snippetAction, usePaste bool) {
+func executeSnippetActions(actions []snippetAction, usePaste bool, generation uint64) bool {
+	if !executionActive(generation) {
+		return false
+	}
 	keyboardEngine.mu.Lock()
 	keyboardEngine.suppressInput = true
 	keyboardEngine.mu.Unlock()
@@ -274,6 +298,9 @@ func executeSnippetActions(actions []snippetAction, usePaste bool) {
 	}()
 
 	for _, action := range actions {
+		if !executionActive(generation) {
+			return false
+		}
 		if action.text != "" {
 			text := C.CString(action.text)
 			if usePaste {
@@ -291,6 +318,13 @@ func executeSnippetActions(actions []snippetAction, usePaste bool) {
 			time.Sleep(12 * time.Millisecond)
 		}
 	}
+	return executionActive(generation)
+}
+
+func executionActive(generation uint64) bool {
+	keyboardEngine.mu.Lock()
+	defer keyboardEngine.mu.Unlock()
+	return keyboardEngine.running && keyboardEngine.generation == generation
 }
 
 func renderSnippetActions(content string) []snippetAction {

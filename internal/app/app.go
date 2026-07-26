@@ -47,6 +47,12 @@ type GeneralSettings struct {
 	TypingTrendEnabled bool   `json:"typingTrendEnabled"`
 	StartAtLogin       bool   `json:"startAtLogin"`
 	SoundName          string `json:"soundName"`
+	FlowToggleHotkey   string `json:"flowToggleHotkey"`
+}
+
+type ApplicationSettings struct {
+	General GeneralSettings `json:"general"`
+	AI      ai.Settings     `json:"ai"`
 }
 
 type AIPromptRule struct {
@@ -87,19 +93,27 @@ type App struct {
 	ttsCmd                  *exec.Cmd
 	ttsMu                   sync.Mutex
 	aiSettingsMu            sync.Mutex
+	settingsSaveMu          sync.Mutex
+	globalShortcutMu        sync.Mutex
+	flowStateMu             sync.Mutex
+	flowLifecycleMu         sync.Mutex
+	flowPaused              bool
+	flowStatusStopper       context.CancelFunc
 	trayManager             *tray.Manager
 	supertonicEngine        *ai.SupertonicEngine
 	supertonicEngineMu      sync.Mutex
 	menuIcon                []byte
+	pausedMenuIcon          []byte
 }
 
 // New creates the Wails application service.
-func New(menuIcon []byte) *App {
+func New(menuIcon []byte, pausedMenuIcon []byte) *App {
 	return &App{
 		aiClient:                ai.NewClient(),
 		appleIntelligenceClient: ai.NewAppleIntelligenceClient(),
 		expansionSoundEvents:    make(chan struct{}, 8),
 		menuIcon:                append([]byte(nil), menuIcon...),
+		pausedMenuIcon:          append([]byte(nil), pausedMenuIcon...),
 	}
 }
 
@@ -116,12 +130,13 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 	a.store = store
 	a.startExpansionSoundDispatcher(ctx)
 	a.configureExpansionSoundEvent()
-	flowengine.Start(a.store)
-	a.configureAIHotkey()
 
-	// Initialize the system tray
+	// Initialize the system tray and the global shortcuts before monitoring starts.
 	appInst := application.Get()
 	a.configureSystemTray(appInst)
+	a.configureGlobalShortcuts()
+	a.reconcileFlowStatus(true)
+	a.startFlowStatusMonitor()
 
 	return nil
 }
@@ -134,6 +149,7 @@ func (a *App) ServiceShutdown() error {
 	if a.appleIntelligenceClient != nil {
 		a.appleIntelligenceClient.Cancel()
 	}
+	a.stopFlowStatusMonitor()
 	a.destroySystemTray()
 	if appInst.GlobalShortcut != nil {
 		_ = appInst.GlobalShortcut.UnregisterAll()
@@ -275,17 +291,120 @@ func (a *App) LogExpansion(snippetID int64, appBundleID string) error {
 }
 
 func (a *App) GetPlatformStatus() platform.Status {
-	status := platform.CurrentStatus()
-	if a.store != nil && status.AccessibilityTrusted && !flowengine.Running() {
-		flowengine.Start(a.store)
-	}
-	status.FlowEngineRunning = flowengine.Running()
-	return status
+	return a.reconcileFlowStatus(false)
 }
 
 func (a *App) RequestAccessibilityPermission() platform.Status {
 	platform.RequestAccessibilityPermission()
-	return a.GetPlatformStatus()
+	return a.reconcileFlowStatus(true)
+}
+
+func (a *App) ToggleFlowPaused() platform.Status {
+	a.flowStateMu.Lock()
+	a.flowPaused = !a.flowPaused
+	paused := a.flowPaused
+	a.flowStateMu.Unlock()
+
+	if paused {
+		a.stopFlowStatusMonitor()
+	}
+	a.configureGlobalShortcuts()
+	if paused {
+		a.cancelFlowOperations()
+	}
+	status := a.reconcileFlowStatus(true)
+	if !paused {
+		a.startFlowStatusMonitor()
+	}
+	return status
+}
+
+func (a *App) isFlowPaused() bool {
+	a.flowStateMu.Lock()
+	defer a.flowStateMu.Unlock()
+	return a.flowPaused
+}
+
+func (a *App) reconcileFlowStatus(emit bool) platform.Status {
+	a.flowLifecycleMu.Lock()
+	status := platform.CurrentStatus()
+	paused := a.isFlowPaused()
+	shouldRun := a.store != nil && status.AccessibilityTrusted && !paused
+	if shouldRun && !flowengine.Running() {
+		flowengine.Start(a.store)
+	}
+	if !shouldRun && flowengine.Running() {
+		flowengine.Stop()
+	}
+	status.FlowEngineRunning = flowengine.Running()
+	status.FlowPaused = paused
+	switch {
+	case paused:
+		status.Message = "Flow is paused by the Flow toggle."
+	case !status.AccessibilityTrusted:
+		status.Message = "Accessibility permission is required before Flow can run."
+	case status.FlowEngineRunning:
+		status.Message = "Flow is active."
+	default:
+		status.Message = "Flow Engine could not start."
+	}
+	a.flowLifecycleMu.Unlock()
+
+	if a.trayManager != nil {
+		a.trayManager.UpdateState(tray.State{FlowPaused: paused, Running: status.FlowEngineRunning})
+	}
+	if emit {
+		if appInst := application.Get(); appInst != nil {
+			appInst.Event.Emit("flow:status-changed", status)
+		}
+	}
+	return status
+}
+
+func (a *App) startFlowStatusMonitor() {
+	a.flowStateMu.Lock()
+	if a.flowPaused || a.flowStatusStopper != nil || a.ctx == nil {
+		a.flowStateMu.Unlock()
+		return
+	}
+	monitorCtx, stop := context.WithCancel(a.ctx)
+	a.flowStatusStopper = stop
+	a.flowStateMu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-monitorCtx.Done():
+				return
+			case <-ticker.C:
+				a.reconcileFlowStatus(true)
+			}
+		}
+	}()
+}
+
+func (a *App) stopFlowStatusMonitor() {
+	a.flowStateMu.Lock()
+	stop := a.flowStatusStopper
+	a.flowStatusStopper = nil
+	a.flowStateMu.Unlock()
+	if stop != nil {
+		stop()
+	}
+}
+
+func (a *App) cancelFlowOperations() {
+	a.CancelAIRequest()
+	a.StopSpeaking()
+	if appInst := application.Get(); appInst != nil {
+		if aiWin, ok := appInst.Window.GetByName("ai"); ok {
+			application.InvokeSync(func() {
+				aiWin.Hide()
+			})
+		}
+	}
 }
 
 func (a *App) GetGeneralSettings() (GeneralSettings, error) {
@@ -308,18 +427,63 @@ func (a *App) GetGeneralSettings() (GeneralSettings, error) {
 }
 
 func (a *App) SaveGeneralSettings(settings GeneralSettings) (GeneralSettings, error) {
+	a.settingsSaveMu.Lock()
+	defer a.settingsSaveMu.Unlock()
+
 	if a.store == nil {
 		return GeneralSettings{}, errors.New("storage is not ready")
 	}
 
 	normalized := NormalizeGeneralSettings(settings)
+	aiSettings, err := a.GetAISettings()
+	if err != nil {
+		return GeneralSettings{}, err
+	}
+	if err := validateUniqueHotkeys(normalized, aiSettings); err != nil {
+		return GeneralSettings{}, err
+	}
 	if err := loginitem.SetEnabled(normalized.StartAtLogin); err != nil {
 		return GeneralSettings{}, err
 	}
 	if err := a.store.SetJSONSetting(generalSettingsKey, normalized); err != nil {
 		return GeneralSettings{}, err
 	}
+	a.configureGlobalShortcuts()
 	return normalized, nil
+}
+
+func (a *App) SaveApplicationSettings(general GeneralSettings, settings ai.Settings) (ApplicationSettings, error) {
+	a.settingsSaveMu.Lock()
+	defer a.settingsSaveMu.Unlock()
+
+	if a.store == nil {
+		return ApplicationSettings{}, errors.New("storage is not ready")
+	}
+
+	normalizedGeneral := NormalizeGeneralSettings(general)
+	normalizedAI := a.normalizeAISettings(settings)
+	if err := validateUniqueHotkeys(normalizedGeneral, normalizedAI); err != nil {
+		return ApplicationSettings{}, err
+	}
+	if err := loginitem.SetEnabled(normalizedGeneral.StartAtLogin); err != nil {
+		return ApplicationSettings{}, err
+	}
+	if err := a.store.SetJSONSetting(generalSettingsKey, normalizedGeneral); err != nil {
+		return ApplicationSettings{}, err
+	}
+
+	a.aiSettingsMu.Lock()
+	err := a.store.SetJSONSetting(aiSettingsKey, normalizedAI)
+	a.aiSettingsMu.Unlock()
+	if err != nil {
+		return ApplicationSettings{}, err
+	}
+
+	a.configureGlobalShortcuts()
+	if appInst := application.Get(); appInst != nil {
+		appInst.Event.Emit("ai:settings-updated", normalizedAI)
+	}
+	return ApplicationSettings{General: normalizedGeneral, AI: normalizedAI}, nil
 }
 
 func (a *App) GetAIPromptSettings() (AIPromptSettings, error) {
@@ -463,18 +627,32 @@ func (a *App) GetAISettings() (ai.Settings, error) {
 }
 
 func (a *App) SaveAISettings(settings ai.Settings) (ai.Settings, error) {
-	a.aiSettingsMu.Lock()
-	defer a.aiSettingsMu.Unlock()
+	a.settingsSaveMu.Lock()
+	defer a.settingsSaveMu.Unlock()
 
+	a.aiSettingsMu.Lock()
 	if a.store == nil {
+		a.aiSettingsMu.Unlock()
 		return ai.Settings{}, errors.New("storage is not ready")
 	}
 
 	normalized := a.normalizeAISettings(settings)
-	if err := a.store.SetJSONSetting(aiSettingsKey, normalized); err != nil {
+	generalSettings, err := a.GetGeneralSettings()
+	if err != nil {
+		a.aiSettingsMu.Unlock()
 		return ai.Settings{}, err
 	}
-	a.configureAIHotkeyWithSettings(normalized)
+	if err := validateUniqueHotkeys(generalSettings, normalized); err != nil {
+		a.aiSettingsMu.Unlock()
+		return ai.Settings{}, err
+	}
+	if err := a.store.SetJSONSetting(aiSettingsKey, normalized); err != nil {
+		a.aiSettingsMu.Unlock()
+		return ai.Settings{}, err
+	}
+	a.aiSettingsMu.Unlock()
+
+	a.configureGlobalShortcuts()
 	if appInst := application.Get(); appInst != nil {
 		appInst.Event.Emit("ai:settings-updated", normalized)
 	}
@@ -513,6 +691,9 @@ func (a *App) CancelTTSModelDownload() {
 }
 
 func (a *App) MakeAIRequest(endpoint string, headers map[string]string, body string) (string, error) {
+	if a.isFlowPaused() {
+		return "", errors.New("Flow is paused")
+	}
 	if a.aiClient == nil {
 		a.aiClient = ai.NewClient()
 	}
@@ -524,6 +705,9 @@ func (a *App) MakeAIRequest(endpoint string, headers map[string]string, body str
 }
 
 func (a *App) RunAIAssist(input ai.AssistRequest) (ai.AssistResult, error) {
+	if a.isFlowPaused() {
+		return ai.AssistResult{}, errors.New("Flow is paused")
+	}
 	settings, err := a.GetAISettings()
 	if err != nil {
 		return ai.AssistResult{}, err
@@ -549,6 +733,9 @@ func (a *App) GetAppleIntelligenceStatus() ai.AppleIntelligenceStatus {
 }
 
 func (a *App) ReplaceSelectedText(processID int, replacement string) error {
+	if a.isFlowPaused() {
+		return errors.New("Flow is paused")
+	}
 	if processID <= 0 {
 		return errors.New("source process is missing")
 	}
@@ -569,6 +756,9 @@ func (a *App) ReplaceSelectedText(processID int, replacement string) error {
 }
 
 func (a *App) ActivateProcess(processID int) error {
+	if a.isFlowPaused() {
+		return errors.New("Flow is paused")
+	}
 	return platform.ActivateProcess(processID)
 }
 
@@ -599,12 +789,15 @@ func (a *App) ShowMainWindow() {
 }
 
 func (a *App) configureSystemTray(appInst *application.App) {
-	a.trayManager = tray.New(appInst, a.menuIcon, tray.Actions{
+	a.trayManager = tray.New(appInst, a.menuIcon, a.pausedMenuIcon, tray.Actions{
 		AskAI: func() {
 			go a.showAIPrompt(platform.GetFrontmostPID(), false)
 		},
 		ShowMainWindow: func() {
 			go a.ShowMainWindow()
+		},
+		ToggleFlow: func() {
+			go a.ToggleFlowPaused()
 		},
 		Quit: func() {
 			go appInst.Quit()
@@ -650,32 +843,44 @@ func (a *App) configureExpansionSoundEvent() {
 	})
 }
 
-func (a *App) configureAIHotkey() {
+func (a *App) configureGlobalShortcuts() {
+	a.globalShortcutMu.Lock()
+	defer a.globalShortcutMu.Unlock()
+
+	appInst := application.Get()
+	if appInst == nil || appInst.GlobalShortcut == nil {
+		return
+	}
+	_ = appInst.GlobalShortcut.UnregisterAll()
+
+	generalSettings, err := a.GetGeneralSettings()
+	if err == nil && generalSettings.FlowToggleHotkey != "" {
+		err = appInst.GlobalShortcut.Register(generalSettings.FlowToggleHotkey, func() {
+			go a.ToggleFlowPaused()
+		})
+		if err != nil {
+			println("failed to register Flow toggle hotkey:", err.Error())
+		}
+	}
+	if a.isFlowPaused() {
+		return
+	}
+
 	settings, err := a.GetAISettings()
 	if err != nil {
 		println("failed to load AI hotkey settings:", err.Error())
 		return
 	}
-	a.configureAIHotkeyWithSettings(settings)
-}
-
-func (a *App) configureAIHotkeyWithSettings(settings ai.Settings) {
-	appInst := application.Get()
-	if appInst.GlobalShortcut != nil {
-		_ = appInst.GlobalShortcut.UnregisterAll()
-	}
-
 	if settings.Enabled && settings.Hotkey != "" {
-		err := appInst.GlobalShortcut.Register(settings.Hotkey, func() {
+		err = appInst.GlobalShortcut.Register(settings.Hotkey, func() {
 			a.handleAIHotkey(platform.GetFrontmostPID())
 		})
 		if err != nil {
 			println("failed to register AI hotkey:", err.Error())
 		}
 	}
-
 	if settings.TTSEnabled && settings.TTSUseShortcut && settings.TTSShortcut != "" {
-		err := appInst.GlobalShortcut.Register(settings.TTSShortcut, func() {
+		err = appInst.GlobalShortcut.Register(settings.TTSShortcut, func() {
 			a.handleTTSHotkey(platform.GetFrontmostPID())
 		})
 		if err != nil {
@@ -689,6 +894,9 @@ func (a *App) handleAIHotkey(sourceProcessID int) {
 }
 
 func (a *App) showAIPrompt(sourceProcessID int, requireEnabled bool) {
+	if a.isFlowPaused() {
+		return
+	}
 	settings, err := a.GetAISettings()
 	if err != nil || (requireEnabled && !settings.Enabled) {
 		return
@@ -749,15 +957,19 @@ func (a *App) ResizeAIPromptWindow(height int) {
 
 func (a *App) normalizeAISettings(settings ai.Settings) ai.Settings {
 	normalized := ai.NormalizeSettings(settings)
-	if parsed, err := hotkey.Parse(normalized.Hotkey); err == nil {
-		normalized.Hotkey = parsed.Canonical
-	} else {
-		normalized.Hotkey = ai.DefaultHotkeyForPlatform()
+	if normalized.Hotkey != "" {
+		if parsed, err := hotkey.Parse(normalized.Hotkey); err == nil {
+			normalized.Hotkey = parsed.Canonical
+		} else {
+			normalized.Hotkey = ""
+		}
 	}
-	if parsed, err := hotkey.Parse(normalized.TTSShortcut); err == nil {
-		normalized.TTSShortcut = parsed.Canonical
-	} else {
-		normalized.TTSShortcut = ai.DefaultTTSHotkeyForPlatform()
+	if normalized.TTSShortcut != "" {
+		if parsed, err := hotkey.Parse(normalized.TTSShortcut); err == nil {
+			normalized.TTSShortcut = parsed.Canonical
+		} else {
+			normalized.TTSShortcut = ""
+		}
 	}
 	return normalized
 }
@@ -777,6 +989,9 @@ func (a *App) TestSpeak(text string, settings ai.Settings) error {
 }
 
 func (a *App) speakWithSettings(text string, settings ai.Settings, requireEnabled bool) error {
+	if a.isFlowPaused() {
+		return errors.New("Flow is paused")
+	}
 	a.ttsMu.Lock()
 	defer a.ttsMu.Unlock()
 
@@ -977,6 +1192,7 @@ func DefaultGeneralSettings() GeneralSettings {
 		Language:           LanguageEnglish,
 		TypingTrendEnabled: true,
 		SoundName:          "None",
+		FlowToggleHotkey:   "",
 	}
 }
 
@@ -1016,6 +1232,29 @@ func NormalizeAIPromptRule(rule AIPromptRule) AIPromptRule {
 	return rule
 }
 
+func validateUniqueHotkeys(general GeneralSettings, settings ai.Settings) error {
+	shortcuts := []struct {
+		name  string
+		value string
+	}{
+		{name: "Flow toggle hotkey", value: general.FlowToggleHotkey},
+		{name: "Prompt hotkey", value: settings.Hotkey},
+		{name: "TTS hotkey", value: settings.TTSShortcut},
+	}
+	seen := make(map[string]string, len(shortcuts))
+	for _, shortcut := range shortcuts {
+		value := strings.ToLower(strings.TrimSpace(shortcut.value))
+		if value == "" {
+			continue
+		}
+		if previous, exists := seen[value]; exists {
+			return fmt.Errorf("%s duplicates %s", shortcut.name, previous)
+		}
+		seen[value] = shortcut.name
+	}
+	return nil
+}
+
 func NormalizeGeneralSettings(settings GeneralSettings) GeneralSettings {
 	settings.ThemeMode = strings.TrimSpace(settings.ThemeMode)
 	switch settings.ThemeMode {
@@ -1034,6 +1273,15 @@ func NormalizeGeneralSettings(settings GeneralSettings) GeneralSettings {
 	settings.SoundName = strings.TrimSpace(settings.SoundName)
 	if settings.SoundName == "" {
 		settings.SoundName = "None"
+	}
+
+	settings.FlowToggleHotkey = strings.TrimSpace(settings.FlowToggleHotkey)
+	if settings.FlowToggleHotkey != "" {
+		if parsed, err := hotkey.Parse(settings.FlowToggleHotkey); err == nil {
+			settings.FlowToggleHotkey = parsed.Canonical
+		} else {
+			settings.FlowToggleHotkey = ""
+		}
 	}
 
 	return settings

@@ -12,7 +12,6 @@ const (
 
 	DefaultEndpoint    = "http://localhost:1234"
 	DefaultTemperature = 0.0
-	DefaultHotkey      = "Cmd+Shift+Space"
 )
 
 var defaultMacPasteReplacementBundleIDs = []string{
@@ -91,7 +90,7 @@ func DefaultSettings() Settings {
 		Provider:                  ProviderOpenAI,
 		Endpoint:                  DefaultEndpoint,
 		Temperature:               DefaultTemperature,
-		Hotkey:                    DefaultHotkeyForPlatform(),
+		Hotkey:                    "",
 		UseSelectedText:           true,
 		UseSelectedFile:           false,
 		ReplaceSelectedText:       true,
@@ -105,24 +104,10 @@ func DefaultSettings() Settings {
 		TTSOSVoice:       "",
 		TTSUseAIResponse: false,
 		TTSUseShortcut:   false,
-		TTSShortcut:      DefaultTTSHotkeyForPlatform(),
+		TTSShortcut:      "",
 		TTSSpeed:         1.05,
 		TTSSteps:         8,
 	}
-}
-
-func DefaultHotkeyForPlatform() string {
-	if runtime.GOOS == "windows" || runtime.GOOS == "linux" {
-		return "Ctrl+Shift+Space"
-	}
-	return DefaultHotkey
-}
-
-func DefaultTTSHotkeyForPlatform() string {
-	if runtime.GOOS == "windows" || runtime.GOOS == "linux" {
-		return "Ctrl+Shift+T"
-	}
-	return "Cmd+Shift+T"
 }
 
 func NormalizeSettings(settings Settings) Settings {
@@ -149,9 +134,6 @@ func NormalizeSettings(settings Settings) Settings {
 	settings.Model = strings.TrimSpace(settings.Model)
 	settings.APIKey = strings.TrimSpace(settings.APIKey)
 	settings.Hotkey = strings.TrimSpace(settings.Hotkey)
-	if settings.Hotkey == "" {
-		settings.Hotkey = defaults.Hotkey
-	}
 
 	if settings.Temperature < 0 {
 		settings.Temperature = 0
@@ -209,9 +191,6 @@ func NormalizeSettings(settings Settings) Settings {
 	}
 
 	settings.TTSShortcut = strings.TrimSpace(settings.TTSShortcut)
-	if settings.TTSShortcut == "" {
-		settings.TTSShortcut = defaults.TTSShortcut
-	}
 
 	if settings.TTSSpeed <= 0 {
 		settings.TTSSpeed = 1.05

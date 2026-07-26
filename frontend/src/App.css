@@ -905,6 +905,7 @@ h2 {
 }
 
 .dashboard-panel {
+    flex-shrink: 0;
     max-width: 760px;
 }
 
@@ -946,9 +947,80 @@ h2 {
 }
 
 .typing-bar {
+    position: relative;
     min-height: 3px;
     border-radius: 999px 999px 0 0;
     background: color-mix(in srgb, var(--primary) 68%, var(--panel-bg));
+    outline: none;
+}
+
+.typing-bar:hover,
+.typing-bar:focus-visible {
+    z-index: 20;
+    background: var(--primary);
+    filter: brightness(1.12);
+}
+
+.typing-bar-tooltip {
+    position: absolute;
+    z-index: 4;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    display: grid;
+    gap: 5px;
+    min-width: 146px;
+    padding: 8px 10px;
+    border: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
+    border-radius: 7px;
+    background: var(--text);
+    color: var(--panel-bg);
+    box-shadow: 0 6px 18px var(--modal-shadow);
+    font-size: 11px;
+    line-height: 1.35;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, 4px);
+    transition: opacity 120ms ease, transform 120ms ease;
+    white-space: nowrap;
+}
+
+.typing-bar:hover .typing-bar-tooltip,
+.typing-bar:focus-visible .typing-bar-tooltip {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
+.typing-bar.tooltip-align-start .typing-bar-tooltip {
+    left: 0;
+    transform: translate(0, 4px);
+}
+
+.typing-bar.tooltip-align-start:hover .typing-bar-tooltip,
+.typing-bar.tooltip-align-start:focus-visible .typing-bar-tooltip,
+.typing-bar.tooltip-align-end:hover .typing-bar-tooltip,
+.typing-bar.tooltip-align-end:focus-visible .typing-bar-tooltip {
+    transform: translate(0, 0);
+}
+
+.typing-bar.tooltip-align-end .typing-bar-tooltip {
+    right: 0;
+    left: auto;
+    transform: translate(0, 4px);
+}
+
+.typing-tooltip-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.typing-tooltip-row > span {
+    opacity: 0.72;
+}
+
+.typing-tooltip-row strong {
+    color: inherit;
+    font-variant-numeric: tabular-nums;
 }
 
 .typing-disabled-overlay {
@@ -1370,6 +1442,11 @@ h2 {
     line-height: 1.4;
 }
 
+.hotkey-control {
+    position: relative;
+    min-width: 0;
+}
+
 .hotkey-capture {
     width: 100%;
     min-width: 0;
@@ -1380,10 +1457,40 @@ h2 {
     font-size: 13px;
 }
 
+.hotkey-control.has-value .hotkey-capture {
+    padding-right: 34px;
+}
+
 .hotkey-capture.recording {
     border-color: var(--primary);
     background: var(--active-bg);
     color: var(--primary);
+}
+
+.hotkey-clear {
+    position: absolute;
+    top: 50%;
+    right: 5px;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid var(--control-border);
+    border-radius: 999px;
+    background: var(--subtle-bg);
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1;
+    transform: translateY(-50%);
+}
+
+.hotkey-clear:hover,
+.hotkey-clear:focus-visible {
+    border-color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 10%, var(--panel-bg));
+    color: var(--danger);
 }
 
 .settings-section button:disabled {
@@ -1597,15 +1704,43 @@ h2 {
 }
 
 .toast {
-    position: absolute;
+    position: fixed;
     right: 20px;
     bottom: 20px;
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     max-width: 520px;
     padding: 12px 14px;
     border: 1px solid var(--danger-border);
     border-radius: 8px;
     background: var(--danger-bg);
     color: var(--danger);
+    box-shadow: 0 8px 24px var(--modal-shadow);
+    animation: toast-in 0.18s ease-out both;
+}
+
+.toast.success {
+    border-color: color-mix(in srgb, var(--good) 45%, var(--border));
+    background: color-mix(in srgb, var(--good) 10%, var(--panel-bg));
+    color: var(--good);
+}
+
+.toast .material-symbols-rounded {
+    flex: 0 0 auto;
+    font-size: 19px;
+}
+
+@keyframes toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .modal-backdrop {
