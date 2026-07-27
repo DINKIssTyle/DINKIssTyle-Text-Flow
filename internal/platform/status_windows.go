@@ -44,6 +44,19 @@ var (
 	procCloseHandle            = kernel32.NewProc("CloseHandle")
 	procQueryFullProcessImage  = kernel32.NewProc("QueryFullProcessImageNameW")
 	enumWindowForPIDCallback   = syscall.NewCallback(enumWindowForPID)
+	ole32                      = syscall.NewLazyDLL("ole32.dll")
+	procCoInitializeEx         = ole32.NewProc("CoInitializeEx")
+	procCoUninitialize         = ole32.NewProc("CoUninitialize")
+	procCoCreateInstance       = ole32.NewProc("CoCreateInstance")
+
+	clsidCUIAutomation = syscall.GUID{
+		Data1: 0xff48dba4, Data2: 0x605d, Data3: 0x4e70,
+		Data4: [8]byte{0x99, 0xbe, 0x01, 0x36, 0xc3, 0xd5, 0x00, 0x24},
+	}
+	iidIUIAutomation = syscall.GUID{
+		Data1: 0x30c3d08a, Data2: 0xae8d, Data3: 0x4f77,
+		Data4: [8]byte{0xa8, 0xa7, 0xa5, 0x77, 0x05, 0xc7, 0xec, 0xd8},
+	}
 )
 
 func CurrentStatus() Status {
@@ -302,20 +315,77 @@ func isFocusedElementEditableForProcess(processID int) bool {
 	info.cbSize = uint32(unsafe.Sizeof(info))
 	procGetGUIThreadInfo := user32.NewProc("GetGUIThreadInfo")
 	ret, _, _ := procGetGUIThreadInfo.Call(uintptr(threadID), uintptr(unsafe.Pointer(&info)))
-	if ret != 0 {
-		if info.hwndCaret != 0 {
-			return true
-		}
-		if info.hwndFocus != 0 {
-			procGetWindowLong := user32.NewProc("GetWindowLongW")
-			const gwlStyle = ^uintptr(15)
-			const esReadonly = 0x0800
-			style, _, _ := procGetWindowLong.Call(info.hwndFocus, gwlStyle)
-			if style != 0 && (style&esReadonly) != 0 {
-				return false
+	if ret != 0 && info.hwndCaret != 0 {
+		return true
+	}
+
+	const (
+		clsctxInprocServer = 1
+		coinitApartment    = 2
+		uiaValuePatternID  = 10002
+	)
+
+	hr, _, _ := procCoInitializeEx.Call(0, coinitApartment)
+	if int32(hr) >= 0 {
+		defer procCoUninitialize.Call()
+
+		var pAutomation uintptr
+		hrCreate, _, _ := procCoCreateInstance.Call(
+			uintptr(unsafe.Pointer(&clsidCUIAutomation)),
+			0,
+			clsctxInprocServer,
+			uintptr(unsafe.Pointer(&iidIUIAutomation)),
+			uintptr(unsafe.Pointer(&pAutomation)),
+		)
+
+		if int32(hrCreate) >= 0 && pAutomation != 0 {
+			defer func() {
+				vtable := (**[100]uintptr)(unsafe.Pointer(pAutomation))
+				syscall.SyscallN(vtable[2], pAutomation)
+			}()
+
+			var pElement uintptr
+			vtableAuto := (**[100]uintptr)(unsafe.Pointer(pAutomation))
+			hrFocused, _, _ := syscall.SyscallN(vtableAuto[7], pAutomation, uintptr(unsafe.Pointer(&pElement)))
+
+			if int32(hrFocused) >= 0 && pElement != 0 {
+				defer func() {
+					vtableElem := (**[100]uintptr)(unsafe.Pointer(pElement))
+					syscall.SyscallN(vtableElem[2], pElement)
+				}()
+
+				var pValuePattern uintptr
+				vtableElem := (**[100]uintptr)(unsafe.Pointer(pElement))
+				hrPattern, _, _ := syscall.SyscallN(vtableElem[17], pElement, uiaValuePatternID, uintptr(unsafe.Pointer(&pValuePattern)))
+
+				if int32(hrPattern) >= 0 && pValuePattern != 0 {
+					defer func() {
+						vtableVal := (**[100]uintptr)(unsafe.Pointer(pValuePattern))
+						syscall.SyscallN(vtableVal[2], pValuePattern)
+					}()
+
+					var isReadOnly int32 = 1
+					vtableVal := (**[100]uintptr)(unsafe.Pointer(pValuePattern))
+					hrReadOnly, _, _ := syscall.SyscallN(vtableVal[5], pValuePattern, uintptr(unsafe.Pointer(&isReadOnly)))
+
+					if int32(hrReadOnly) >= 0 {
+						return isReadOnly == 0
+					}
+				}
 			}
 		}
 	}
-	return true
+
+	if info.hwndFocus != 0 {
+		procGetWindowLong := user32.NewProc("GetWindowLongW")
+		const gwlStyle = ^uintptr(15)
+		const esReadonly = 0x0800
+		style, _, _ := procGetWindowLong.Call(info.hwndFocus, gwlStyle)
+		if style != 0 && (style&esReadonly) != 0 {
+			return false
+		}
+	}
+
+	return false
 }
 
