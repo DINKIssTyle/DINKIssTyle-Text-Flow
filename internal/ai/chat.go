@@ -45,10 +45,11 @@ func RunAssist(client ChatClient, settings Settings, request AssistRequest) (Ass
 		return AssistResult{}, errors.New("AI client is required")
 	}
 
+	canReplace := CanReplaceSelectedText(request)
 	payload := chatRequest{
 		Model: settings.Model,
 		Messages: []chatMessage{
-			{Role: "system", Content: BuildSystemPrompt(request.ContextKind != ContextNone && strings.TrimSpace(request.ContextText) != "", request.CustomPrompt)},
+			{Role: "system", Content: BuildSystemPrompt(canReplace)},
 			{Role: "user", Content: BuildUserPrompt(request)},
 		},
 	}
@@ -77,7 +78,7 @@ func RunAssist(client ChatClient, settings Settings, request AssistRequest) (Ass
 	if err != nil {
 		return AssistResult{}, err
 	}
-	return ParseAssistResult(content), nil
+	return ParseAssistResult(content, canReplace), nil
 }
 
 func ExtractChatContent(responseText string) (string, error) {

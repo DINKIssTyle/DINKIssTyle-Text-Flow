@@ -2,7 +2,10 @@
 
 package ai
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 // TTSModelStatus holds status for downloading models.
 type TTSModelStatus struct {
@@ -25,6 +28,13 @@ func (tts *SupertonicEngine) Destroy() {}
 
 func (tts *SupertonicEngine) Synthesize(text string, lang string, style *Style, totalStep int, speed float32) ([]float32, error) {
 	return nil, errors.New("local Supertonic TTS is not supported on this operating system yet")
+}
+
+func (tts *SupertonicEngine) SynthesizeContext(ctx context.Context, text string, lang string, style *Style, totalStep int, speed float32) ([]float32, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return tts.Synthesize(text, lang, style, totalStep, speed)
 }
 
 func LoadVoiceStyle(path string) (*Style, error) {

@@ -476,7 +476,10 @@ func (tts *SupertonicEngine) sampleNoisyLatent(durOnnx []float32) ([][][]float64
 	return noisyLatent, latentMask
 }
 
-func (tts *SupertonicEngine) _infer(textList []string, langList []string, style *Style, totalStep int, speed float32) ([]float32, []float32, error) {
+func (tts *SupertonicEngine) inferContext(ctx context.Context, textList []string, langList []string, style *Style, totalStep int, speed float32) ([]float32, []float32, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	bsz := len(textList)
 
 	// Process text
@@ -498,6 +501,9 @@ func (tts *SupertonicEngine) _infer(textList []string, langList []string, style 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to run duration predictor: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	durTensor := dpOutputs[0].(*ort.Tensor[float32])
 	defer durTensor.Destroy()
 	durOnnx := durTensor.GetData()
@@ -516,6 +522,9 @@ func (tts *SupertonicEngine) _infer(textList []string, langList []string, style 
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to run text encoder: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
 	}
 	textEmbTensor := textEncOutputs[0].(*ort.Tensor[float32])
 	defer textEmbTensor.Destroy()
@@ -536,6 +545,9 @@ func (tts *SupertonicEngine) _infer(textList []string, langList []string, style 
 
 	// Denoising loop
 	for step := 0; step < totalStep; step++ {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		currentStepArray := make([]float32, bsz)
 		for b := 0; b < bsz; b++ {
 			currentStepArray[b] = float32(step)
@@ -559,6 +571,14 @@ func (tts *SupertonicEngine) _infer(textList []string, langList []string, style 
 			textMaskTensor2.Destroy()
 			return nil, nil, fmt.Errorf("failed to run vector estimator: %w", err)
 		}
+		if err := ctx.Err(); err != nil {
+			currentStepTensor.Destroy()
+			noisyLatentTensor.Destroy()
+			latentMaskTensor.Destroy()
+			textMaskTensor2.Destroy()
+			vectorEstOutputs[0].Destroy()
+			return nil, nil, err
+		}
 
 		denoisedTensor := vectorEstOutputs[0].(*ort.Tensor[float32])
 		denoisedData := denoisedTensor.GetData()
@@ -581,6 +601,9 @@ func (tts *SupertonicEngine) _infer(textList []string, langList []string, style 
 	}
 
 	// Generate waveform
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	finalLatentTensor := ArrayToTensor(xt, latentShape)
 	defer finalLatentTensor.Destroy()
 
@@ -592,6 +615,10 @@ func (tts *SupertonicEngine) _infer(textList []string, langList []string, style 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to run vocoder: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		vocoderOutputs[0].Destroy()
+		return nil, nil, err
+	}
 
 	wavBatchTensor := vocoderOutputs[0].(*ort.Tensor[float32])
 	defer wavBatchTensor.Destroy()
@@ -601,6 +628,13 @@ func (tts *SupertonicEngine) _infer(textList []string, langList []string, style 
 }
 
 func (tts *SupertonicEngine) Synthesize(text string, lang string, style *Style, totalStep int, speed float32) ([]float32, error) {
+	return tts.SynthesizeContext(context.Background(), text, lang, style, totalStep, speed)
+}
+
+func (tts *SupertonicEngine) SynthesizeContext(ctx context.Context, text string, lang string, style *Style, totalStep int, speed float32) ([]float32, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	maxLen := 300
 	if lang == "ko" || lang == "ja" {
 		maxLen = 120
@@ -611,7 +645,10 @@ func (tts *SupertonicEngine) Synthesize(text string, lang string, style *Style, 
 	silenceDuration := float32(0.3)
 
 	for i, chunk := range chunks {
-		wav, duration, err := tts._infer([]string{chunk}, []string{lang}, style, totalStep, speed)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		wav, duration, err := tts.inferContext(ctx, []string{chunk}, []string{lang}, style, totalStep, speed)
 		if err != nil {
 			return nil, err
 		}

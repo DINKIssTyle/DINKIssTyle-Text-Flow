@@ -65,7 +65,6 @@ type InvocationContext struct {
 	IsEditable      bool        `json:"isEditable"`
 }
 
-
 type AssistRequest struct {
 	Instruction  string      `json:"instruction"`
 	ContextKind  ContextKind `json:"contextKind"`
@@ -74,6 +73,7 @@ type AssistRequest struct {
 	AppName      string      `json:"appName"`
 	AppBundleID  string      `json:"appBundleId"`
 	CustomPrompt string      `json:"customPrompt"`
+	CanReplace   bool        `json:"canReplace"`
 }
 
 type AssistResult struct {

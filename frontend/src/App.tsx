@@ -27,6 +27,7 @@ import {
     GetPlatformStatus,
     GetTTSModelStatus,
     ImportSnippetsAndAIPrompts,
+    IsFocusedElementEditable,
     ListOSVoices,
     StartTTSModelDownload,
     CancelTTSModelDownload,
@@ -771,6 +772,23 @@ function App() {
     }, []);
 
     useEffect(() => {
+        if (!isHUD) {
+            return;
+        }
+        const stopAITTS = () => {
+            aiTTSGenerationRef.current += 1;
+            setAITTSSynthesizing(false);
+            StopSpeaking().catch(() => {});
+        };
+        const cancelHide = Events.On('common:WindowHide', stopAITTS);
+        const cancelClosing = Events.On('common:WindowClosing', stopAITTS);
+        return () => {
+            cancelHide();
+            cancelClosing();
+        };
+    }, []);
+
+    useEffect(() => {
         if (isHUD) {
             return;
         }
@@ -1092,8 +1110,8 @@ function App() {
         setHasBeenInvoked(false);
         const shouldCancelRequest = cancelRunning && aiRequestRunningRef.current;
         resetAIHUDContent();
+        StopSpeaking().catch(() => {});
         if (cancelRunning) {
-            StopSpeaking().catch(() => {});
             if (shouldCancelRequest) {
                 try {
                     await CancelAIRequest();
@@ -1638,6 +1656,21 @@ function App() {
             setAISettings(requestSettings);
             StopSpeaking().catch(() => {});
 
+            const hasSelectedText = requestContext.kind === 'selected_text' &&
+                !!requestContext.text.trim() &&
+                requestContext.sourceProcessId > 0;
+            const preferPasteReplacement = hasSelectedText &&
+                !!requestContext.appBundleId &&
+                (requestSettings.pasteReplacementBundleIds || []).includes(requestContext.appBundleId);
+            let isEditableTarget = requestContext.isEditable === true || preferPasteReplacement;
+            if (hasSelectedText && !isEditableTarget) {
+                try {
+                    isEditableTarget = await IsFocusedElementEditable(requestContext.sourceProcessId);
+                } catch {
+                    // Keep the invocation-time result when a live recheck is unavailable.
+                }
+            }
+
             const result = await RunAIAssist({
                 instruction,
                 contextKind: (requestContext.kind || 'none') as any,
@@ -1646,22 +1679,20 @@ function App() {
                 appName: requestContext.appName || '',
                 appBundleId: requestContext.appBundleId || '',
                 customPrompt: '',
+                // Selected-text requests still need edit-vs-answer classification when
+                // platform accessibility cannot prove that the source is editable.
+                canReplace: hasSelectedText,
             });
             if (requestGeneration !== aiRequestGenerationRef.current) {
                 return;
             }
             const isEdit = result.intent === 'edit' && !!result.replacement;
-            const isEditableTarget = requestContext.isEditable === true;
             if (
                 requestSettings?.replaceSelectedText &&
-                requestContext.kind === 'selected_text' &&
-                !!requestContext.text.trim() &&
-                requestContext.sourceProcessId > 0 &&
+                hasSelectedText &&
                 isEdit &&
                 isEditableTarget
             ) {
-                const preferPasteReplacement = !!requestContext.appBundleId &&
-                    (requestSettings.pasteReplacementBundleIds || []).includes(requestContext.appBundleId);
                 if (preferPasteReplacement) {
                     await hideCurrentWindow(false);
                     await ActivateProcess(requestContext.sourceProcessId);

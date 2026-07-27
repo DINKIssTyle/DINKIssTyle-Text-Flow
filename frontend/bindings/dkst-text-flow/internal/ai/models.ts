@@ -15,6 +15,7 @@ export interface AssistRequest {
     "appName": string;
     "appBundleId": string;
     "customPrompt": string;
+    "canReplace": boolean;
 }
 
 export interface AssistResult {

@@ -233,6 +233,7 @@ static int DKSTIsElementEditable(AXUIElementRef element) {
         return 0;
     }
 
+    int isTextInputRole = 0;
     CFTypeRef roleValue = NULL;
     AXError roleError = AXUIElementCopyAttributeValue(
         element,
@@ -246,6 +247,9 @@ static int DKSTIsElementEditable(AXUIElementRef element) {
                 CFRelease(roleValue);
                 return 0;
             }
+            isTextInputRole =
+                [role isEqualToString:(__bridge NSString *)kAXTextFieldRole] ||
+                [role isEqualToString:(__bridge NSString *)kAXTextAreaRole];
         }
         CFRelease(roleValue);
     }
@@ -258,6 +262,30 @@ static int DKSTIsElementEditable(AXUIElementRef element) {
 
     settableError = AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute, &isSettable);
     if (settableError == kAXErrorSuccess && isSettable) {
+        return 1;
+    }
+
+    settableError = AXUIElementIsAttributeSettable(element, kAXSelectedTextRangeAttribute, &isSettable);
+    if (settableError == kAXErrorSuccess && isSettable) {
+        return 1;
+    }
+
+    CFTypeRef editableValue = NULL;
+    AXError editableError = AXUIElementCopyAttributeValue(
+        element,
+        CFSTR("AXEditable"),
+        &editableValue
+    );
+    if (editableError == kAXErrorSuccess && editableValue != NULL) {
+        int editable = CFGetTypeID(editableValue) == CFBooleanGetTypeID() &&
+            CFBooleanGetValue((CFBooleanRef)editableValue);
+        CFRelease(editableValue);
+        return editable;
+    }
+
+    // Some rich-text and canvas editors accept keyboard input and paste but do
+    // not expose their text value as settable through Accessibility.
+    if (isTextInputRole) {
         return 1;
     }
 

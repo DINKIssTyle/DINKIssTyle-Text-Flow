@@ -8,6 +8,7 @@ export namespace ai {
 	    appName: string;
 	    appBundleId: string;
 	    customPrompt: string;
+	    canReplace: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new AssistRequest(source);
@@ -22,6 +23,7 @@ export namespace ai {
 	        this.appName = source["appName"];
 	        this.appBundleId = source["appBundleId"];
 	        this.customPrompt = source["customPrompt"];
+	        this.canReplace = source["canReplace"];
 	    }
 	}
 	export class AssistResult {
@@ -412,4 +414,3 @@ export namespace storage {
 	}
 
 }
-

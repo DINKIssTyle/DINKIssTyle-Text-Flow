@@ -41,13 +41,13 @@ func RunAppleIntelligenceAssist(client AppleIntelligenceClient, settings Setting
 		return AssistResult{}, errors.New("Apple Intelligence client is required")
 	}
 
-	hasContext := request.ContextKind != ContextNone && strings.TrimSpace(request.ContextText) != ""
+	canReplace := CanReplaceSelectedText(request)
 	content, err := client.Generate(
-		BuildSystemPrompt(hasContext, request.CustomPrompt),
+		BuildSystemPrompt(canReplace),
 		BuildUserPrompt(request),
 	)
 	if err != nil {
 		return AssistResult{}, err
 	}
-	return ParseAssistResult(content), nil
+	return ParseAssistResult(content, canReplace), nil
 }

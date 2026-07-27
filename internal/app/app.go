@@ -91,7 +91,10 @@ type App struct {
 	expansionSoundEvents    chan struct{}
 	expansionSoundStopper   context.CancelFunc
 	ttsCmd                  *exec.Cmd
+	ttsCancel               context.CancelFunc
+	ttsActiveID             uint64
 	ttsMu                   sync.Mutex
+	ttsSynthesisMu          sync.Mutex
 	aiSettingsMu            sync.Mutex
 	settingsSaveMu          sync.Mutex
 	globalShortcutMu        sync.Mutex
@@ -997,15 +1000,6 @@ func (a *App) speakWithSettings(text string, settings ai.Settings, requireEnable
 	if a.isFlowPaused() {
 		return errors.New("Flow is paused")
 	}
-	a.ttsMu.Lock()
-	defer a.ttsMu.Unlock()
-
-	// Stop any existing playback
-	if a.ttsCmd != nil && a.ttsCmd.Process != nil {
-		_ = a.ttsCmd.Process.Kill()
-		_ = a.ttsCmd.Wait()
-		a.ttsCmd = nil
-	}
 
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -1016,23 +1010,42 @@ func (a *App) speakWithSettings(text string, settings ai.Settings, requireEnable
 		return errors.New("TTS is disabled in settings")
 	}
 
+	ctx, speechID := a.beginSpeaking()
+	playbackStarted := false
+	defer func() {
+		if !playbackStarted {
+			a.finishSpeaking(speechID, nil)
+		}
+	}()
+
 	switch settings.TTSEngine {
 	case "os":
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		cmd, err := speech.StartNative(text, settings.TTSOSVoice)
 		if err != nil {
 			return err
 		}
-		a.ttsCmd = cmd
-		go func(cmd *exec.Cmd) {
+		if !a.attachSpeakingCommand(speechID, cmd) {
+			stopSpeakingCommand(cmd)
+			return context.Canceled
+		}
+		playbackStarted = true
+		go func(id uint64, cmd *exec.Cmd) {
 			_ = cmd.Wait()
-			a.ttsMu.Lock()
-			if a.ttsCmd == cmd {
-				a.ttsCmd = nil
-			}
-			a.ttsMu.Unlock()
-		}(a.ttsCmd)
+			a.finishSpeaking(id, cmd)
+		}(speechID, cmd)
 
 	case "supertonic3":
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		a.ttsSynthesisMu.Lock()
+		defer a.ttsSynthesisMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		configDir, err := os.UserConfigDir()
 		if err != nil {
 			return fmt.Errorf("failed to resolve user config dir: %w", err)
@@ -1056,6 +1069,9 @@ func (a *App) speakWithSettings(text string, settings ai.Settings, requireEnable
 		}
 		engine := a.supertonicEngine
 		a.supertonicEngineMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 
 		// Load selected voice style JSON
 		voiceStylePath := filepath.Join(supertonicDir, "voice_styles", settings.TTSVoice+".json")
@@ -1075,9 +1091,15 @@ func (a *App) speakWithSettings(text string, settings ai.Settings, requireEnable
 		}
 
 		// Synthesize waveform
-		wavData, err := engine.Synthesize(text, lang, style, settings.TTSSteps, float32(settings.TTSSpeed))
+		wavData, err := engine.SynthesizeContext(ctx, text, lang, style, settings.TTSSteps, float32(settings.TTSSpeed))
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return context.Canceled
+			}
 			return fmt.Errorf("failed to synthesize speech: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		// Write to a temporary WAV file
@@ -1093,23 +1115,27 @@ func (a *App) speakWithSettings(text string, settings ai.Settings, requireEnable
 			_ = os.Remove(tempFilePath)
 			return fmt.Errorf("failed to write WAV data: %w", err)
 		}
+		if err := ctx.Err(); err != nil {
+			_ = os.Remove(tempFilePath)
+			return err
+		}
 
 		cmd, err := speech.StartAudioPlayback(tempFilePath)
 		if err != nil {
 			_ = os.Remove(tempFilePath)
 			return err
 		}
-		a.ttsCmd = cmd
-
-		go func(cmd *exec.Cmd, filePath string) {
+		if !a.attachSpeakingCommand(speechID, cmd) {
+			stopSpeakingCommand(cmd)
+			_ = os.Remove(tempFilePath)
+			return context.Canceled
+		}
+		playbackStarted = true
+		go func(id uint64, cmd *exec.Cmd, filePath string) {
 			_ = cmd.Wait()
 			_ = os.Remove(filePath)
-			a.ttsMu.Lock()
-			if a.ttsCmd == cmd {
-				a.ttsCmd = nil
-			}
-			a.ttsMu.Unlock()
-		}(a.ttsCmd, tempFilePath)
+			a.finishSpeaking(id, cmd)
+		}(speechID, cmd, tempFilePath)
 
 	default:
 		return fmt.Errorf("unknown TTS engine: %s", settings.TTSEngine)
@@ -1120,12 +1146,66 @@ func (a *App) speakWithSettings(text string, settings ai.Settings, requireEnable
 
 func (a *App) StopSpeaking() {
 	a.ttsMu.Lock()
-	defer a.ttsMu.Unlock()
+	cancel := a.ttsCancel
+	cmd := a.ttsCmd
+	a.ttsActiveID++
+	a.ttsCancel = nil
+	a.ttsCmd = nil
+	a.ttsMu.Unlock()
 
-	if a.ttsCmd != nil && a.ttsCmd.Process != nil {
-		_ = a.ttsCmd.Process.Kill()
-		_ = a.ttsCmd.Wait()
-		a.ttsCmd = nil
+	if cancel != nil {
+		cancel()
+	}
+	stopSpeakingCommand(cmd)
+}
+
+func (a *App) beginSpeaking() (context.Context, uint64) {
+	a.ttsMu.Lock()
+	previousCancel := a.ttsCancel
+	previousCmd := a.ttsCmd
+	a.ttsActiveID++
+	speechID := a.ttsActiveID
+	ctx, cancel := context.WithCancel(context.Background())
+	a.ttsCancel = cancel
+	a.ttsCmd = nil
+	a.ttsMu.Unlock()
+
+	if previousCancel != nil {
+		previousCancel()
+	}
+	stopSpeakingCommand(previousCmd)
+	return ctx, speechID
+}
+
+func (a *App) attachSpeakingCommand(speechID uint64, cmd *exec.Cmd) bool {
+	a.ttsMu.Lock()
+	defer a.ttsMu.Unlock()
+	if a.ttsActiveID != speechID || a.ttsCancel == nil {
+		return false
+	}
+	a.ttsCmd = cmd
+	return true
+}
+
+func (a *App) finishSpeaking(speechID uint64, cmd *exec.Cmd) {
+	a.ttsMu.Lock()
+	defer a.ttsMu.Unlock()
+	if a.ttsActiveID != speechID {
+		return
+	}
+	if cmd != nil && a.ttsCmd != cmd {
+		return
+	}
+	if a.ttsCancel != nil {
+		a.ttsCancel()
+	}
+	a.ttsCancel = nil
+	a.ttsCmd = nil
+}
+
+func stopSpeakingCommand(cmd *exec.Cmd) {
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
 	}
 }
 
@@ -1136,7 +1216,7 @@ func (a *App) handleTTSHotkey(sourceProcessID int) {
 	}
 
 	a.ttsMu.Lock()
-	isSpeaking := a.ttsCmd != nil
+	isSpeaking := a.ttsCancel != nil || a.ttsCmd != nil
 	a.ttsMu.Unlock()
 
 	if isSpeaking {
