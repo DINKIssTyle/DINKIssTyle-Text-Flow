@@ -14,7 +14,16 @@ func TestPromptContractUsesCompactModeSpecificInstructions(t *testing.T) {
 	if strings.Contains(answerPrompt, "Transformation requests default to REPLACE") {
 		t.Fatal("answer-only prompt should not classify intent")
 	}
-	if wordCount := len(strings.Fields(answerPrompt)); wordCount > 120 {
+	for _, required := range []string{
+		"answer in the instruction's language",
+		"Never infer the answer language from the context",
+		"foreign-language context does not authorize a foreign-language answer",
+	} {
+		if !strings.Contains(answerPrompt, required) {
+			t.Fatalf("answer-only prompt does not contain language rule %q", required)
+		}
+	}
+	if wordCount := len(strings.Fields(answerPrompt)); wordCount > 145 {
 		t.Fatalf("answer-only prompt is too long: %d words", wordCount)
 	}
 
@@ -31,13 +40,17 @@ func TestPromptContractUsesCompactModeSpecificInstructions(t *testing.T) {
 		"usable revision or derivative",
 		"Do not reveal this reasoning",
 		"code, Markdown, HTML, or scripts",
+		"ANSWER language",
+		"foreign-language selection",
+		"REPLACE language",
+		"otherwise preserve the selected content's language",
 		"first a line containing only FORCE_REPLACE, REPLACE, or ANSWER",
 	} {
 		if !strings.Contains(editablePrompt, required) {
 			t.Fatalf("editable-selection prompt does not contain %q", required)
 		}
 	}
-	if wordCount := len(strings.Fields(editablePrompt)); wordCount > 330 {
+	if wordCount := len(strings.Fields(editablePrompt)); wordCount > 380 {
 		t.Fatalf("editable-selection prompt is too long: %d words", wordCount)
 	}
 }
@@ -77,8 +90,13 @@ func TestPromptContractMarksExplicitEditDirectivesForForcedReplacement(t *testin
 		{instruction: "이 문장을 수정해", want: true},
 		{instruction: "선택문을 영어 문장으로 교체해", want: true},
 		{instruction: "문장을 개선해", want: true},
+		{instruction: "작성", want: true},
+		{instruction: "이 주제로 글을 써줘", want: true},
+		{instruction: "내용을 완성해줘", want: true},
 		{instruction: "Fix the grammar", want: true},
 		{instruction: "Improve this sentence", want: true},
+		{instruction: "Write an article about this", want: true},
+		{instruction: "Complete this draft", want: true},
 		{instruction: "Please edit this", want: true},
 		{instruction: "この文章を修正して", want: true},
 		{instruction: "修改这句话", want: true},
