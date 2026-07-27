@@ -55,6 +55,8 @@ export namespace ai {
 	    useSelectedText: boolean;
 	    useSelectedFile: boolean;
 	    replaceSelectedText: boolean;
+	    historyEnabled: boolean;
+	    historyCount: number;
 	    pasteReplacementBundleIds: string[];
 	
 	    static createFrom(source: any = {}) {
@@ -73,6 +75,8 @@ export namespace ai {
 	        this.useSelectedText = source["useSelectedText"];
 	        this.useSelectedFile = source["useSelectedFile"];
 	        this.replaceSelectedText = source["replaceSelectedText"];
+	        this.historyEnabled = source["historyEnabled"];
+	        this.historyCount = source["historyCount"];
 	        this.pasteReplacementBundleIds = source["pasteReplacementBundleIds"];
 	    }
 	}

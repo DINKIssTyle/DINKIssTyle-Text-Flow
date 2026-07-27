@@ -47,6 +47,8 @@ export interface Settings {
     "useSelectedText": boolean;
     "useSelectedFile": boolean;
     "replaceSelectedText": boolean;
+    "historyEnabled": boolean;
+    "historyCount": number;
     "pasteReplacementBundleIds": string[] | null;
 
     /**

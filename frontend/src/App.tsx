@@ -1208,6 +1208,8 @@ function App() {
             useSelectedText: settings?.useSelectedText ?? true,
             useSelectedFile: !!settings?.useSelectedFile,
             replaceSelectedText: settings?.replaceSelectedText ?? true,
+            historyEnabled: !!settings?.historyEnabled,
+            historyCount: Math.min(100, Math.max(1, Number(settings?.historyCount) || 10)),
             pasteReplacementBundleIds: Array.isArray(settings?.pasteReplacementBundleIds)
                 ? settings.pasteReplacementBundleIds.filter((bundleId: unknown) => typeof bundleId === 'string')
                 : (isMacOS ? ['com.apple.iWork.Keynote', 'com.apple.iWork.Pages', 'com.apple.iWork.Numbers'] : []),
@@ -2583,22 +2585,69 @@ function App() {
                                             </div>
                                         </>
                                     )}
-                                    {isMacOS && <label className="wide-setting">
-                                        {t('pasteReplacementBundleIds')}
-                                        <div className="bundle-list-control">
-                                            <textarea
-                                                value={formatBundleIdList(aiSettings.pasteReplacementBundleIds || [])}
+                                    <div className="settings-section-header">
+                                        <h3>{t('aiHistory')}</h3>
+                                        <p>{t('aiHistoryDescription')}</p>
+                                    </div>
+                                    <div className="settings-form-grid">
+                                        <label className="checkbox-setting">
+                                            <span>{t('useAiHistory')}</span>
+                                            <input
+                                                type="checkbox"
+                                                checked={aiSettings.historyEnabled}
+                                                disabled={aiSettings.provider === 'apple_intelligence'}
                                                 onChange={(event) => setAISettings({
                                                     ...aiSettings,
-                                                    pasteReplacementBundleIds: parseBundleIdList(event.target.value),
+                                                    historyEnabled: event.target.checked,
                                                 })}
-                                                placeholder="com.apple.iWork.Keynote&#10;com.apple.iWork.Pages&#10;com.apple.iWork.Numbers"
-                                                rows={3}
                                             />
-                                            <button type="button" onClick={browsePasteReplacementApp}>{t('browse')}</button>
+                                        </label>
+                                        <label>
+                                            {t('aiHistoryCount')}
+                                            <input
+                                                value={aiSettings.historyCount}
+                                                min={1}
+                                                max={100}
+                                                step={1}
+                                                type="number"
+                                                disabled={!aiSettings.historyEnabled || aiSettings.provider === 'apple_intelligence'}
+                                                onChange={(event) => setAISettings({
+                                                    ...aiSettings,
+                                                    historyCount: Math.min(100, Math.max(1, Number(event.target.value) || 10)),
+                                                })}
+                                            />
+                                        </label>
+                                    </div>
+                                    <span className="field-hint">
+                                        {t(aiSettings.provider === 'lmstudio'
+                                            ? 'lmStudioHistoryHint'
+                                            : aiSettings.provider === 'apple_intelligence'
+                                                ? 'aiHistoryUnavailableHint'
+                                                : 'aiHistoryHint')}
+                                    </span>
+                                    <hr className="settings-divider" />
+                                    {isMacOS && <>
+                                        <div className="settings-section-header">
+                                            <h3>{t('appCompatibility')}</h3>
+                                            <p>{t('appCompatibilityDescription')}</p>
                                         </div>
-                                        <span className="field-hint">{t('pasteReplacementBundleIdsHint')}</span>
-                                    </label>}
+                                        <label className="wide-setting">
+                                            {t('pasteReplacementBundleIds')}
+                                            <div className="bundle-list-control">
+                                                <textarea
+                                                    value={formatBundleIdList(aiSettings.pasteReplacementBundleIds || [])}
+                                                    onChange={(event) => setAISettings({
+                                                        ...aiSettings,
+                                                        pasteReplacementBundleIds: parseBundleIdList(event.target.value),
+                                                    })}
+                                                    placeholder="com.apple.iWork.Keynote&#10;com.apple.iWork.Pages&#10;com.apple.iWork.Numbers"
+                                                    rows={3}
+                                                />
+                                                <button type="button" onClick={browsePasteReplacementApp}>{t('browse')}</button>
+                                            </div>
+                                            <span className="field-hint">{t('pasteReplacementBundleIdsHint')}</span>
+                                        </label>
+                                    </>}
 
                                     <hr className="settings-divider" />
 

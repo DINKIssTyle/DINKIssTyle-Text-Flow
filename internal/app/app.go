@@ -87,6 +87,7 @@ type App struct {
 	ctx                     context.Context
 	store                   *storage.Store
 	aiClient                *ai.Client
+	aiHistory               *ai.ConversationHistory
 	appleIntelligenceClient ai.AppleIntelligenceClient
 	expansionSoundEvents    chan struct{}
 	expansionSoundStopper   context.CancelFunc
@@ -113,6 +114,7 @@ type App struct {
 func New(menuIcon []byte, pausedMenuIcon []byte) *App {
 	return &App{
 		aiClient:                ai.NewClient(),
+		aiHistory:               ai.NewConversationHistory(),
 		appleIntelligenceClient: ai.NewAppleIntelligenceClient(),
 		expansionSoundEvents:    make(chan struct{}, 8),
 		menuIcon:                append([]byte(nil), menuIcon...),
@@ -718,14 +720,18 @@ func (a *App) RunAIAssist(input ai.AssistRequest) (ai.AssistResult, error) {
 	if a.aiClient == nil {
 		a.aiClient = ai.NewClient()
 	}
+	if a.aiHistory == nil {
+		a.aiHistory = ai.NewConversationHistory()
+	}
 	input.CustomPrompt = a.customPromptForRequest(input)
 	if settings.Provider == ai.ProviderAppleIntelligence {
+		a.aiHistory.Reset()
 		if a.appleIntelligenceClient == nil {
 			a.appleIntelligenceClient = ai.NewAppleIntelligenceClient()
 		}
 		return ai.RunAppleIntelligenceAssist(a.appleIntelligenceClient, settings, input)
 	}
-	return ai.RunAssist(a.aiClient, settings, input)
+	return ai.RunAssistWithHistory(a.aiClient, settings, input, a.aiHistory)
 }
 
 func (a *App) GetAppleIntelligenceStatus() ai.AppleIntelligenceStatus {

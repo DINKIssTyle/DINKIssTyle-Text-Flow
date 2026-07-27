@@ -31,6 +31,8 @@ type Settings struct {
 	UseSelectedText           bool     `json:"useSelectedText"`
 	UseSelectedFile           bool     `json:"useSelectedFile"`
 	ReplaceSelectedText       bool     `json:"replaceSelectedText"`
+	HistoryEnabled            bool     `json:"historyEnabled"`
+	HistoryCount              int      `json:"historyCount"`
 	PasteReplacementBundleIDs []string `json:"pasteReplacementBundleIds"`
 
 	// TTS Settings
@@ -97,6 +99,8 @@ func DefaultSettings() Settings {
 		UseSelectedText:           true,
 		UseSelectedFile:           false,
 		ReplaceSelectedText:       true,
+		HistoryEnabled:            false,
+		HistoryCount:              10,
 		PasteReplacementBundleIDs: pasteReplacementBundleIDs,
 
 		// TTS Defaults
@@ -143,6 +147,12 @@ func NormalizeSettings(settings Settings) Settings {
 	}
 	if settings.Temperature > 2 {
 		settings.Temperature = 2
+	}
+	if settings.HistoryCount <= 0 {
+		settings.HistoryCount = defaults.HistoryCount
+	}
+	if settings.HistoryCount > 100 {
+		settings.HistoryCount = 100
 	}
 
 	if settings.PasteReplacementBundleIDs == nil {
