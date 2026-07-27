@@ -10,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf16"
 	"unsafe"
 
 	"dkst-text-flow/internal/flow"
@@ -45,6 +46,29 @@ type kbdllhookstruct struct {
 	DwExtraInfo uintptr
 }
 
+type winMouseInput struct {
+	Dx          int32
+	Dy          int32
+	MouseData   uint32
+	DwFlags     uint32
+	Time        uint32
+	DwExtraInfo uintptr
+}
+
+type winKeyboardInput struct {
+	WVk         uint16
+	WScan       uint16
+	DwFlags     uint32
+	Time        uint32
+	DwExtraInfo uintptr
+}
+
+// SendInput's union is sized and aligned like MOUSEINPUT, its largest member.
+type winInput struct {
+	Type uint32
+	Data winMouseInput
+}
+
 type msg struct {
 	Hwnd    uintptr
 	Message uint32
@@ -68,7 +92,9 @@ const (
 	wmKeyDown            = 0x0100
 	wmSysKeyDown         = 0x0104
 	wmQuit               = 0x0012
+	inputKeyboard        = 1
 	keyeventfKeyup       = 0x0002
+	keyeventfUnicode     = 0x0004
 	vkBack               = 0x08
 	vkTab                = 0x09
 	vkReturn             = 0x0D
@@ -105,6 +131,8 @@ var (
 	procToUnicode           = user32.NewProc("ToUnicode")
 	procGetKeyState         = user32.NewProc("GetKeyState")
 	procKeybdEvent          = user32.NewProc("keybd_event")
+	procSendInput           = user32.NewProc("SendInput")
+	procClipboardSequence   = user32.NewProc("GetClipboardSequenceNumber")
 	procGetCurrentThreadID  = kernel32.NewProc("GetCurrentThreadId")
 	procGetModuleHandle     = kernel32.NewProc("GetModuleHandleW")
 	keyboardProcCallback    = syscall.NewCallback(keyboardProc)
@@ -478,7 +506,7 @@ func executeSnippetActions(actions []snippetAction, usePaste bool, generation ui
 			return false
 		}
 		if action.text != "" {
-			pasteText(action.text)
+			insertSnippetText(action.text, usePaste)
 			time.Sleep(24 * time.Millisecond)
 			continue
 		}
@@ -488,6 +516,68 @@ func executeSnippetActions(actions []snippetAction, usePaste bool, generation ui
 		}
 	}
 	return executionActive(generation)
+}
+
+type unicodeRuneSender func(rune) bool
+type snippetTextPaster func(string)
+
+func insertSnippetText(text string, usePaste bool) {
+	insertSnippetTextWith(text, usePaste, sendUnicodeRune, pasteText)
+}
+
+func insertSnippetTextWith(text string, usePaste bool, sender unicodeRuneSender, paster snippetTextPaster) {
+	text = strings.ReplaceAll(text, "\x00", "")
+	if text == "" {
+		return
+	}
+	if usePaste {
+		paster(text)
+		return
+	}
+
+	for byteOffset, value := range text {
+		if !sender(value) {
+			paster(text[byteOffset:])
+			return
+		}
+	}
+}
+
+func sendUnicodeRune(value rune) bool {
+	inputs := unicodeInputsForRune(value)
+	if len(inputs) == 0 {
+		return true
+	}
+
+	sent, _, _ := procSendInput.Call(
+		uintptr(len(inputs)),
+		uintptr(unsafe.Pointer(&inputs[0])),
+		unsafe.Sizeof(inputs[0]),
+	)
+	return sent == uintptr(len(inputs))
+}
+
+func unicodeInputsForRune(value rune) []winInput {
+	units := utf16.Encode([]rune{value})
+	inputs := make([]winInput, 0, len(units)*2)
+	for _, unit := range units {
+		inputs = append(inputs,
+			newUnicodeInput(unit, 0),
+			newUnicodeInput(unit, keyeventfKeyup),
+		)
+	}
+	return inputs
+}
+
+func newUnicodeInput(unit uint16, flags uint32) winInput {
+	input := winInput{Type: inputKeyboard}
+	keyboard := (*winKeyboardInput)(unsafe.Pointer(&input.Data))
+	*keyboard = winKeyboardInput{
+		WScan:       unit,
+		DwFlags:     keyeventfUnicode | flags,
+		DwExtraInfo: syntheticInputMarker,
+	}
+	return input
 }
 
 func executionActive(generation uint64) bool {
@@ -604,15 +694,27 @@ func postKey(vk uintptr) {
 }
 
 func pasteText(text string) {
-	previous := clipboardText()
+	previous, err := platform.ReadClipboardText()
+	if err != nil {
+		return
+	}
 	if err := setClipboardText(text); err != nil {
 		return
 	}
+	replacementSequence := clipboardSequenceNumber()
 	procKeybdEvent.Call(vkControl, 0, 0, syntheticInputMarker)
 	postKey(vkV)
 	procKeybdEvent.Call(vkControl, 0, keyeventfKeyup, syntheticInputMarker)
 	time.Sleep(200 * time.Millisecond)
+	if replacementSequence != 0 && clipboardSequenceNumber() != replacementSequence {
+		return
+	}
 	_ = setClipboardText(previous)
+}
+
+func clipboardSequenceNumber() uint32 {
+	sequence, _, _ := procClipboardSequence.Call()
+	return uint32(sequence)
 }
 
 func clipboardText() string {
