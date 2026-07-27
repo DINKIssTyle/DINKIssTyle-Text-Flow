@@ -25,6 +25,9 @@ func TestPromptContractUsesCompactModeSpecificInstructions(t *testing.T) {
 		"Polite or question wording",
 		"Use ANSWER only for information",
 		"Never label transformed selection content as ANSWER",
+		"reason privately in this order",
+		"usable revision or derivative",
+		"Do not reveal this reasoning",
 		"code, Markdown, HTML, or scripts",
 		"first a line containing only REPLACE or ANSWER",
 	} {
@@ -32,7 +35,7 @@ func TestPromptContractUsesCompactModeSpecificInstructions(t *testing.T) {
 			t.Fatalf("editable-selection prompt does not contain %q", required)
 		}
 	}
-	if wordCount := len(strings.Fields(editablePrompt)); wordCount > 180 {
+	if wordCount := len(strings.Fields(editablePrompt)); wordCount > 250 {
 		t.Fatalf("editable-selection prompt is too long: %d words", wordCount)
 	}
 }
