@@ -49,5 +49,5 @@ func RunAppleIntelligenceAssist(client AppleIntelligenceClient, settings Setting
 	if err != nil {
 		return AssistResult{}, err
 	}
-	return ParseAssistResult(content, canReplace), nil
+	return ParseAssistResultForRequest(content, request), nil
 }

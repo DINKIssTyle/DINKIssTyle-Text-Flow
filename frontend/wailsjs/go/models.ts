@@ -30,6 +30,7 @@ export namespace ai {
 	    intent: string;
 	    supportReport: string;
 	    replacement: string;
+	    forceReplace: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new AssistResult(source);
@@ -40,6 +41,7 @@ export namespace ai {
 	        this.intent = source["intent"];
 	        this.supportReport = source["supportReport"];
 	        this.replacement = source["replacement"];
+	        this.forceReplace = source["forceReplace"];
 	    }
 	}
 	export class Settings {

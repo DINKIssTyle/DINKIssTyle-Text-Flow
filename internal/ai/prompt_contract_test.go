@@ -21,6 +21,8 @@ func TestPromptContractUsesCompactModeSpecificInstructions(t *testing.T) {
 	editablePrompt := BuildSystemPrompt(true)
 	for _, required := range []string{
 		"app routing labels",
+		"FORCE_REPLACE authorizes",
+		"explicitly directs an edit or insertion",
 		"changed or derived selection",
 		"Polite or question wording",
 		"Use ANSWER only for information",
@@ -29,13 +31,13 @@ func TestPromptContractUsesCompactModeSpecificInstructions(t *testing.T) {
 		"usable revision or derivative",
 		"Do not reveal this reasoning",
 		"code, Markdown, HTML, or scripts",
-		"first a line containing only REPLACE or ANSWER",
+		"first a line containing only FORCE_REPLACE, REPLACE, or ANSWER",
 	} {
 		if !strings.Contains(editablePrompt, required) {
 			t.Fatalf("editable-selection prompt does not contain %q", required)
 		}
 	}
-	if wordCount := len(strings.Fields(editablePrompt)); wordCount > 250 {
+	if wordCount := len(strings.Fields(editablePrompt)); wordCount > 330 {
 		t.Fatalf("editable-selection prompt is too long: %d words", wordCount)
 	}
 }
@@ -64,6 +66,66 @@ func TestPromptContractSerializesUntrustedContextAsJSON(t *testing.T) {
 	}
 	if payload.AppRules != request.CustomPrompt {
 		t.Fatalf("unexpected app rules: %q", payload.AppRules)
+	}
+}
+
+func TestPromptContractMarksExplicitEditDirectivesForForcedReplacement(t *testing.T) {
+	tests := []struct {
+		instruction string
+		want        bool
+	}{
+		{instruction: "이 문장을 수정해", want: true},
+		{instruction: "선택문을 영어 문장으로 교체해", want: true},
+		{instruction: "문장을 개선해", want: true},
+		{instruction: "Fix the grammar", want: true},
+		{instruction: "Improve this sentence", want: true},
+		{instruction: "Please edit this", want: true},
+		{instruction: "この文章を修正して", want: true},
+		{instruction: "修改这句话", want: true},
+		{instruction: "Translate to English", want: false},
+		{instruction: "What does this mean?", want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.instruction, func(t *testing.T) {
+			request := AssistRequest{
+				Instruction: test.instruction,
+				ContextKind: ContextSelectedText,
+				ContextText: "selected",
+				CanReplace:  true,
+			}
+			if got := RequiresForcedReplacement(request); got != test.want {
+				t.Fatalf("RequiresForcedReplacement() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestPromptContractDoesNotForceWithoutSelectedText(t *testing.T) {
+	request := AssistRequest{
+		Instruction: "Insert this",
+		ContextKind: ContextNone,
+		CanReplace:  true,
+	}
+	if RequiresForcedReplacement(request) {
+		t.Fatal("request without selected text must not force replacement")
+	}
+}
+
+func TestPromptContractSerializesRequiredForcedMode(t *testing.T) {
+	request := AssistRequest{
+		Instruction: "선택문을 수정해",
+		ContextKind: ContextSelectedText,
+		ContextText: "selected",
+		CanReplace:  true,
+	}
+
+	var payload promptPayload
+	if err := json.Unmarshal([]byte(BuildUserPrompt(request)), &payload); err != nil {
+		t.Fatalf("user prompt is not valid JSON: %v", err)
+	}
+	if payload.RequiredMode != "FORCE_REPLACE" {
+		t.Fatalf("unexpected required mode: %q", payload.RequiredMode)
 	}
 }
 
@@ -120,6 +182,51 @@ func TestPromptContractPreservesCodeAndMarkdownReplacement(t *testing.T) {
 	result := ParseAssistResult("REPLACE\n"+content, true)
 	if result.Intent != IntentEdit || result.Replacement != content {
 		t.Fatalf("replacement formatting changed: %#v", result)
+	}
+}
+
+func TestPromptContractParsesForcedReplacement(t *testing.T) {
+	result := ParseAssistResult("FORCE_REPLACE\nCorrected text.", true)
+	if result.Intent != IntentEdit ||
+		result.Replacement != "Corrected text." ||
+		!result.ForceReplace {
+		t.Fatalf("unexpected forced replacement result: %#v", result)
+	}
+}
+
+func TestPromptContractDoesNotForceOrdinaryReplacement(t *testing.T) {
+	result := ParseAssistResult("REPLACE\nTranslated text.", true)
+	if result.Intent != IntentEdit ||
+		result.Replacement != "Translated text." ||
+		result.ForceReplace {
+		t.Fatalf("unexpected ordinary replacement result: %#v", result)
+	}
+}
+
+func TestPromptContractIgnoresForcedReplacementWithoutSelectionPermission(t *testing.T) {
+	raw := "FORCE_REPLACE\nCorrected text."
+	result := ParseAssistResult(raw, false)
+	if result.Intent != IntentQuestion ||
+		result.SupportReport != raw ||
+		result.Replacement != "" ||
+		result.ForceReplace {
+		t.Fatalf("unexpected answer-only result: %#v", result)
+	}
+}
+
+func TestPromptContractEnforcesExplicitEditDirectiveWhenModelAnswers(t *testing.T) {
+	request := AssistRequest{
+		Instruction: "이 문장으로 교체해",
+		ContextKind: ContextSelectedText,
+		ContextText: "old text",
+		CanReplace:  true,
+	}
+	result := ParseAssistResultForRequest("ANSWER\nNew text.", request)
+	if result.Intent != IntentEdit ||
+		result.Replacement != "New text." ||
+		!result.ForceReplace ||
+		result.SupportReport != "" {
+		t.Fatalf("unexpected enforced replacement result: %#v", result)
 	}
 }
 

@@ -49,7 +49,7 @@ func TestAppleAssistUsesTheSameModeSpecificPromptContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("editable-selection request failed: %v", err)
 	}
-	if edit.Intent != IntentEdit || edit.Replacement != "Corrected text." {
+	if edit.Intent != IntentEdit || edit.Replacement != "Corrected text." || !edit.ForceReplace {
 		t.Fatalf("unexpected edit result: %#v", edit)
 	}
 	if editClient.instructions != BuildSystemPrompt(true) {

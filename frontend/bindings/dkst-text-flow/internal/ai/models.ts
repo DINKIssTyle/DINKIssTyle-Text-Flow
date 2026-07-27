@@ -22,6 +22,7 @@ export interface AssistResult {
     "intent": string;
     "supportReport": string;
     "replacement": string;
+    "forceReplace": boolean;
 }
 
 export enum ContextKind {

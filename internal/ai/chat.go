@@ -78,7 +78,7 @@ func RunAssist(client ChatClient, settings Settings, request AssistRequest) (Ass
 	if err != nil {
 		return AssistResult{}, err
 	}
-	return ParseAssistResult(content, canReplace), nil
+	return ParseAssistResultForRequest(content, request), nil
 }
 
 func ExtractChatContent(responseText string) (string, error) {

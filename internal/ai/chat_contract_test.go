@@ -60,7 +60,7 @@ func TestRunAssistUsesStructuredContractForEditableSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunAssist returned an error: %v", err)
 	}
-	if result.Intent != IntentEdit || result.Replacement != content {
+	if result.Intent != IntentEdit || result.Replacement != content || !result.ForceReplace {
 		t.Fatalf("unexpected editable-selection result: %#v", result)
 	}
 

@@ -80,6 +80,7 @@ type AssistResult struct {
 	Intent        string `json:"intent"`
 	SupportReport string `json:"supportReport"`
 	Replacement   string `json:"replacement"`
+	ForceReplace  bool   `json:"forceReplace"`
 }
 
 func DefaultSettings() Settings {

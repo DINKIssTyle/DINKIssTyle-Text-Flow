@@ -292,6 +292,48 @@ static int DKSTIsElementEditable(AXUIElementRef element) {
     return 0;
 }
 
+static int DKSTIsElementOrAncestorEditable(AXUIElementRef element) {
+    if (element == NULL) {
+        return 0;
+    }
+
+    const int maxDepth = 8;
+    AXUIElementRef current = (AXUIElementRef)CFRetain(element);
+    for (int depth = 0; depth < maxDepth; depth++) {
+        if (DKSTIsElementEditable(current)) {
+            CFRelease(current);
+            return 1;
+        }
+
+        CFTypeRef parentValue = NULL;
+        AXError parentError = AXUIElementCopyAttributeValue(
+            current,
+            kAXParentAttribute,
+            &parentValue
+        );
+        if (parentError != kAXErrorSuccess ||
+            parentValue == NULL ||
+            CFGetTypeID(parentValue) != AXUIElementGetTypeID()) {
+            if (parentValue != NULL) {
+                CFRelease(parentValue);
+            }
+            break;
+        }
+
+        AXUIElementRef parent = (AXUIElementRef)parentValue;
+        if (CFEqual(current, parent)) {
+            CFRelease(parent);
+            break;
+        }
+
+        CFRelease(current);
+        current = parent;
+    }
+
+    CFRelease(current);
+    return 0;
+}
+
 static int DKSTIsFocusedElementEditableForPID(pid_t pid) {
     if (pid <= 0 || pid == getpid()) {
         AXUIElementRef systemWide = AXUIElementCreateSystemWide();
@@ -304,7 +346,7 @@ static int DKSTIsFocusedElementEditableForPID(pid_t pid) {
             );
             CFRelease(systemWide);
             if (focusedError == kAXErrorSuccess && focused != NULL) {
-                int editable = DKSTIsElementEditable(focused);
+                int editable = DKSTIsElementOrAncestorEditable(focused);
                 CFRelease(focused);
                 return editable;
             }
@@ -328,7 +370,7 @@ static int DKSTIsFocusedElementEditableForPID(pid_t pid) {
         return 0;
     }
 
-    int editable = DKSTIsElementEditable(focused);
+    int editable = DKSTIsElementOrAncestorEditable(focused);
     CFRelease(focused);
     return editable;
 }

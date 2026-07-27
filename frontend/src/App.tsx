@@ -1687,20 +1687,22 @@ function App() {
                 return;
             }
             const isEdit = result.intent === 'edit' && !!result.replacement;
+            const forceReplacement = result.forceReplace === true;
             if (
                 requestSettings?.replaceSelectedText &&
                 hasSelectedText &&
                 isEdit &&
-                isEditableTarget
+                (isEditableTarget || forceReplacement)
             ) {
-                if (preferPasteReplacement) {
+                const prepareBeforeReplacement = preferPasteReplacement || forceReplacement;
+                if (prepareBeforeReplacement) {
                     await hideCurrentWindow(false);
                     await ActivateProcess(requestContext.sourceProcessId);
                     await waits(180);
                 }
                 await ReplaceSelectedText(requestContext.sourceProcessId, result.replacement);
                 playCompletionSound();
-                if (!preferPasteReplacement) {
+                if (!prepareBeforeReplacement) {
                     await hideCurrentWindow(false);
                     await ActivateProcess(requestContext.sourceProcessId);
                 }
