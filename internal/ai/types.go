@@ -62,7 +62,9 @@ type InvocationContext struct {
 	SourceProcessID int         `json:"sourceProcessId"`
 	AppName         string      `json:"appName"`
 	AppBundleID     string      `json:"appBundleId"`
+	IsEditable      bool        `json:"isEditable"`
 }
+
 
 type AssistRequest struct {
 	Instruction  string      `json:"instruction"`

@@ -62,6 +62,7 @@ type AIInvocationContext = {
     sourceProcessId: number;
     appName: string;
     appBundleId: string;
+    isEditable?: boolean;
 };
 
 const aiHUDCollapsedHeight = 74;
@@ -482,6 +483,7 @@ function App() {
         sourceProcessId: 0,
         appName: '',
         appBundleId: '',
+        isEditable: false,
     });
     const aiPromptRef = useRef<HTMLTextAreaElement | null>(null);
     const aiHUDHeightRef = useRef(aiHUDCollapsedHeight);
@@ -757,6 +759,7 @@ function App() {
                 sourceProcessId: context?.sourceProcessId || 0,
                 appName: context?.appName || '',
                 appBundleId: context?.appBundleId || '',
+                isEditable: context?.isEditable ?? false,
             });
             const focusGeneration = ++aiFocusGenerationRef.current;
             window.setTimeout(() => {
@@ -1648,12 +1651,14 @@ function App() {
                 return;
             }
             const isEdit = result.intent === 'edit' && !!result.replacement;
+            const isEditableTarget = requestContext.isEditable === true;
             if (
                 requestSettings?.replaceSelectedText &&
                 requestContext.kind === 'selected_text' &&
                 !!requestContext.text.trim() &&
                 requestContext.sourceProcessId > 0 &&
-                isEdit
+                isEdit &&
+                isEditableTarget
             ) {
                 const preferPasteReplacement = !!requestContext.appBundleId &&
                     (requestSettings.pasteReplacementBundleIds || []).includes(requestContext.appBundleId);

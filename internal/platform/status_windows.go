@@ -274,3 +274,48 @@ func waitForClipboardText(timeout time.Duration) (string, error) {
 		time.Sleep(clipboardPollInterval)
 	}
 }
+
+func isFocusedElementEditableForProcess(processID int) bool {
+	hwnd := windowForPID(processID)
+	if hwnd == 0 {
+		return false
+	}
+	var threadID uint32
+	procGetWindowThreadProcess.Call(hwnd, uintptr(unsafe.Pointer(&threadID)))
+	if threadID == 0 {
+		return false
+	}
+
+	type guiThreadInfo struct {
+		cbSize        uint32
+		flags         uint32
+		hwndActive    uintptr
+		hwndFocus     uintptr
+		hwndCapture   uintptr
+		hwndMenuOwner uintptr
+		hwndMoveSize  uintptr
+		hwndCaret     uintptr
+		rcCaret       [4]int32
+	}
+
+	var info guiThreadInfo
+	info.cbSize = uint32(unsafe.Sizeof(info))
+	procGetGUIThreadInfo := user32.NewProc("GetGUIThreadInfo")
+	ret, _, _ := procGetGUIThreadInfo.Call(uintptr(threadID), uintptr(unsafe.Pointer(&info)))
+	if ret != 0 {
+		if info.hwndCaret != 0 {
+			return true
+		}
+		if info.hwndFocus != 0 {
+			procGetWindowLong := user32.NewProc("GetWindowLongW")
+			const gwlStyle = ^uintptr(15)
+			const esReadonly = 0x0800
+			style, _, _ := procGetWindowLong.Call(info.hwndFocus, gwlStyle)
+			if style != 0 && (style&esReadonly) != 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+

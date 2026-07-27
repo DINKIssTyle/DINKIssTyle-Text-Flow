@@ -228,6 +228,84 @@ static char* DKSTSelectedTextByAccessibilityForPID(pid_t pid) {
     return result;
 }
 
+static int DKSTIsElementEditable(AXUIElementRef element) {
+    if (element == NULL) {
+        return 0;
+    }
+
+    CFTypeRef roleValue = NULL;
+    AXError roleError = AXUIElementCopyAttributeValue(
+        element,
+        kAXRoleAttribute,
+        &roleValue
+    );
+    if (roleError == kAXErrorSuccess && roleValue != NULL) {
+        if (CFGetTypeID(roleValue) == CFStringGetTypeID()) {
+            NSString *role = (__bridge NSString *)roleValue;
+            if ([role isEqualToString:(__bridge NSString *)kAXStaticTextRole]) {
+                CFRelease(roleValue);
+                return 0;
+            }
+        }
+        CFRelease(roleValue);
+    }
+
+    Boolean isSettable = false;
+    AXError settableError = AXUIElementIsAttributeSettable(element, kAXValueAttribute, &isSettable);
+    if (settableError == kAXErrorSuccess && isSettable) {
+        return 1;
+    }
+
+    settableError = AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute, &isSettable);
+    if (settableError == kAXErrorSuccess && isSettable) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static int DKSTIsFocusedElementEditableForPID(pid_t pid) {
+    if (pid <= 0 || pid == getpid()) {
+        AXUIElementRef systemWide = AXUIElementCreateSystemWide();
+        if (systemWide != NULL) {
+            AXUIElementRef focused = NULL;
+            AXError focusedError = AXUIElementCopyAttributeValue(
+                systemWide,
+                kAXFocusedUIElementAttribute,
+                (CFTypeRef *)&focused
+            );
+            CFRelease(systemWide);
+            if (focusedError == kAXErrorSuccess && focused != NULL) {
+                int editable = DKSTIsElementEditable(focused);
+                CFRelease(focused);
+                return editable;
+            }
+        }
+        return 0;
+    }
+
+    AXUIElementRef app = AXUIElementCreateApplication(pid);
+    if (app == NULL) {
+        return 0;
+    }
+
+    AXUIElementRef focused = NULL;
+    AXError focusedError = AXUIElementCopyAttributeValue(
+        app,
+        kAXFocusedUIElementAttribute,
+        (CFTypeRef *)&focused
+    );
+    CFRelease(app);
+    if (focusedError != kAXErrorSuccess || focused == NULL) {
+        return 0;
+    }
+
+    int editable = DKSTIsElementEditable(focused);
+    CFRelease(focused);
+    return editable;
+}
+
+
 static NSArray<NSDictionary<NSPasteboardType, NSData *> *> *DKSTSnapshotPasteboard(NSPasteboard *pasteboard) {
     NSMutableArray<NSDictionary<NSPasteboardType, NSData *> *> *snapshot = [NSMutableArray array];
     for (NSPasteboardItem *item in [pasteboard pasteboardItems]) {
@@ -690,7 +768,13 @@ func getFrontmostPID() int {
 	return int(C.DKSTFrontmostPID())
 }
 
+func isFocusedElementEditableForProcess(processID int) bool {
+	pid := C.pid_t(processID)
+	return C.DKSTIsFocusedElementEditableForPID(pid) == 1
+}
+
 func cString(value *C.char) string {
+
 	if value == nil {
 		return ""
 	}

@@ -12,11 +12,14 @@
     "includeApplicationsLink" : true,
     "includeInstallerPackage" : false,
     "layoutTemplate" : "template2",
+    "notarize" : true,
+    "signDiskImage" : true,
+    "signingIdentity" : "Developer ID Application: Nomin Park (QQ3GJ5KGP2)",
     "volumeName" : "DKST Text Flow Alpha",
     "windowHeight" : 447,
     "windowWidth" : 620
   },
-  "formatVersion" : 3,
+  "formatVersion" : 5,
   "installer" : {
     "backgroundAlignment" : "center",
     "backgroundScaling" : "proportional",
@@ -26,6 +29,7 @@
     "installLocation" : "\/Applications",
     "installationDomain" : "localSystem",
     "licenseText" : "",
+    "notarize" : true,
     "readMeText" : "",
     "showConclusion" : true,
     "showLicense" : false,
@@ -35,7 +39,7 @@
     "version" : "1.0.0",
     "welcomeText" : "Welcome to the DKST Text Flow installer."
   },
-  "installerIdentity" : "",
+  "installerIdentity" : "Developer ID Installer: Nomin Park (QQ3GJ5KGP2)",
   "signInstaller" : false,
   "targetRelativePath" : "Documents\/GitHub\/DINKIssTyle-Text-Flow\/bin\/DKST Text Flow.app"
 }

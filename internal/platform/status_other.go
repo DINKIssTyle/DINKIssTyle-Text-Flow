@@ -39,3 +39,8 @@ func appInfoFromBundlePath(path string) AppInfo {
 func getFrontmostPID() int {
 	return 0
 }
+
+func isFocusedElementEditableForProcess(processID int) bool {
+	return false
+}
+

@@ -755,6 +755,10 @@ func (a *App) ReplaceSelectedText(processID int, replacement string) error {
 	return platform.ReplaceSelectedTextInProcess(processID, replacement, preferPaste)
 }
 
+func (a *App) IsFocusedElementEditable(processID int) bool {
+	return platform.IsFocusedElementEditableForProcess(processID)
+}
+
 func (a *App) ActivateProcess(processID int) error {
 	if a.isFlowPaused() {
 		return errors.New("Flow is paused")
@@ -906,6 +910,7 @@ func (a *App) showAIPrompt(sourceProcessID int, requireEnabled bool) {
 		Kind:            ai.ContextNone,
 		Label:           "No Context",
 		SourceProcessID: sourceProcessID,
+		IsEditable:      platform.IsFocusedElementEditableForProcess(sourceProcessID),
 	}
 	appInfo := platform.AppInfoFromProcess(sourceProcessID)
 	invocation.AppName = appInfo.Name
