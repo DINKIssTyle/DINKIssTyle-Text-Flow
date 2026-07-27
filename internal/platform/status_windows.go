@@ -288,6 +288,13 @@ func waitForClipboardText(timeout time.Duration) (string, error) {
 	}
 }
 
+func getVTable(pUnk uintptr) *[100]uintptr {
+	if pUnk == 0 {
+		return nil
+	}
+	return (*[100]uintptr)(*(*unsafe.Pointer)(unsafe.Pointer(pUnk)))
+}
+
 func isFocusedElementEditableForProcess(processID int) bool {
 	hwnd := windowForPID(processID)
 	if hwnd == 0 {
@@ -340,33 +347,39 @@ func isFocusedElementEditableForProcess(processID int) bool {
 
 		if int32(hrCreate) >= 0 && pAutomation != 0 {
 			defer func() {
-				vtable := (**[100]uintptr)(unsafe.Pointer(pAutomation))
-				syscall.SyscallN(vtable[2], pAutomation)
+				vt := getVTable(pAutomation)
+				if vt != nil {
+					syscall.SyscallN(vt[2], pAutomation)
+				}
 			}()
 
 			var pElement uintptr
-			vtableAuto := (**[100]uintptr)(unsafe.Pointer(pAutomation))
-			hrFocused, _, _ := syscall.SyscallN(vtableAuto[7], pAutomation, uintptr(unsafe.Pointer(&pElement)))
+			vtAuto := getVTable(pAutomation)
+			hrFocused, _, _ := syscall.SyscallN(vtAuto[7], pAutomation, uintptr(unsafe.Pointer(&pElement)))
 
 			if int32(hrFocused) >= 0 && pElement != 0 {
 				defer func() {
-					vtableElem := (**[100]uintptr)(unsafe.Pointer(pElement))
-					syscall.SyscallN(vtableElem[2], pElement)
+					vtElem := getVTable(pElement)
+					if vtElem != nil {
+						syscall.SyscallN(vtElem[2], pElement)
+					}
 				}()
 
 				var pValuePattern uintptr
-				vtableElem := (**[100]uintptr)(unsafe.Pointer(pElement))
-				hrPattern, _, _ := syscall.SyscallN(vtableElem[17], pElement, uiaValuePatternID, uintptr(unsafe.Pointer(&pValuePattern)))
+				vtElem := getVTable(pElement)
+				hrPattern, _, _ := syscall.SyscallN(vtElem[17], pElement, uiaValuePatternID, uintptr(unsafe.Pointer(&pValuePattern)))
 
 				if int32(hrPattern) >= 0 && pValuePattern != 0 {
 					defer func() {
-						vtableVal := (**[100]uintptr)(unsafe.Pointer(pValuePattern))
-						syscall.SyscallN(vtableVal[2], pValuePattern)
+						vtVal := getVTable(pValuePattern)
+						if vtVal != nil {
+							syscall.SyscallN(vtVal[2], pValuePattern)
+						}
 					}()
 
 					var isReadOnly int32 = 1
-					vtableVal := (**[100]uintptr)(unsafe.Pointer(pValuePattern))
-					hrReadOnly, _, _ := syscall.SyscallN(vtableVal[5], pValuePattern, uintptr(unsafe.Pointer(&isReadOnly)))
+					vtVal := getVTable(pValuePattern)
+					hrReadOnly, _, _ := syscall.SyscallN(vtVal[5], pValuePattern, uintptr(unsafe.Pointer(&isReadOnly)))
 
 					if int32(hrReadOnly) >= 0 {
 						return isReadOnly == 0
