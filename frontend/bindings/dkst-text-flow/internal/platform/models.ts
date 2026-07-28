@@ -9,6 +9,7 @@ export interface AppInfo {
 
 export interface Status {
     "accessibilityTrusted": boolean;
+    "screenRecordingGranted": boolean;
     "secureInputActive": boolean;
     "activeAppName": string;
     "activeBundleId": string;

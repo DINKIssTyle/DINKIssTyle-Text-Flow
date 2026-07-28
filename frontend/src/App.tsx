@@ -37,6 +37,7 @@ import {
     ListLabels,
     ListSnippetsByLabel,
     RequestAccessibilityPermission,
+    RequestScreenRecordingPermission,
     ReplaceSelectedText,
     ResizeAIPromptWindow,
     RunAIAssist,
@@ -74,6 +75,11 @@ type ScreenCaptureAttachment = {
     mimeType: string;
     width: number;
     height: number;
+};
+
+type PreparedSound = {
+    buffer: AudioBuffer;
+    startOffset: number;
 };
 
 const aiHUDCollapsedHeight = 74;
@@ -149,24 +155,47 @@ const snippetTokens: { labelKey: TranslationKey; value: string }[] = [
 ];
 
 const noSoundName = 'None';
-const soundAssetModules = import.meta.glob('./assets/sounds/*', {
+const soundAssetModules = import.meta.glob('./assets/sounds/*.wav', {
     eager: true,
     as: 'url',
 }) as Record<string, string>;
-const soundOptions = [
-    noSoundName,
-    ...Object.keys(soundAssetModules)
-        .map((path) => path.split('/').pop() ?? '')
-        .filter(Boolean)
-        .map((filename) => filename.replace(/\.[^.]+$/, ''))
-        .sort((left, right) => left.localeCompare(right, undefined, { numeric: true })),
-];
 const soundURLs = Object.fromEntries(
     Object.entries(soundAssetModules).map(([path, url]) => {
         const filename = path.split('/').pop() ?? '';
         return [filename.replace(/\.[^.]+$/, ''), url];
     }),
 ) as Record<string, string>;
+const soundOptions = [
+    noSoundName,
+    ...Object.keys(soundURLs)
+        .filter(Boolean)
+        .sort((left, right) => left.localeCompare(right, undefined, { numeric: true })),
+];
+
+function resolveSoundName(soundName?: string) {
+    if (!soundName) {
+        return noSoundName;
+    }
+    return soundOptions.find((option) => option.toLowerCase() === soundName.toLowerCase()) ?? noSoundName;
+}
+
+function audibleStartOffset(buffer: AudioBuffer) {
+    const audibleThreshold = 0.004;
+    let firstAudibleFrame = buffer.length;
+    for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+        const samples = buffer.getChannelData(channel);
+        for (let frame = 0; frame < firstAudibleFrame; frame += 1) {
+            if (Math.abs(samples[frame]) >= audibleThreshold) {
+                firstAudibleFrame = frame;
+                break;
+            }
+        }
+    }
+    if (firstAudibleFrame >= buffer.length) {
+        return 0;
+    }
+    return Math.max(0, firstAudibleFrame / buffer.sampleRate - 0.005);
+}
 
 const emptyPromptRule: AIPromptRule = {
     useSelectedText: true,
@@ -609,6 +638,8 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
     const [selectedID, setSelectedID] = useState<number | null>(null);
     const [detailMode, setDetailMode] = useState<'all' | 'label' | 'snippet'>('all');
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false);
+    const [requestingPermission, setRequestingPermission] = useState<'accessibility' | 'screenRecording' | null>(null);
     const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
     const [form, setForm] = useState<SnippetInput>(emptyInput);
     const [labelForm, setLabelForm] = useState<LabelInput>(emptyLabelInput);
@@ -662,6 +693,9 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
     const shortcutInputRef = useRef<HTMLInputElement | null>(null);
     const soundNameRef = useRef(noSoundName);
     const soundAudioRef = useRef<HTMLAudioElement | null>(null);
+    const soundAudioContextRef = useRef<AudioContext | null>(null);
+    const preparedSoundsRef = useRef<Map<string, PreparedSound>>(new Map());
+    const soundPreparationRef = useRef<Map<string, Promise<PreparedSound | null>>>(new Map());
 
     const selectedSnippet = useMemo(() => {
         return snippets.find((snippet) => snippet.id === selectedID) ?? null;
@@ -681,6 +715,19 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         const timeout = window.setTimeout(() => setSaveToast(null), 2600);
         return () => window.clearTimeout(timeout);
     }, [saveToast]);
+
+    useEffect(() => {
+        if (!isPermissionModalOpen) {
+            return;
+        }
+        const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setIsPermissionModalOpen(false);
+            }
+        };
+        window.addEventListener('keydown', closeOnEscape);
+        return () => window.removeEventListener('keydown', closeOnEscape);
+    }, [isPermissionModalOpen]);
 
     function showSaveToast(message: string) {
         saveToastSequenceRef.current += 1;
@@ -702,6 +749,7 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         audio.preload = 'auto';
         audio.load();
         soundAudioRef.current = audio;
+        void prepareSound(soundName);
     }, [generalSettings?.soundName]);
 
     useEffect(() => {
@@ -1248,12 +1296,27 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
 
     async function requestAccessibilityPermission() {
         setError('');
+        setRequestingPermission('accessibility');
         try {
             const nextStatus = await RequestAccessibilityPermission();
             setPlatformStatus(nextStatus);
-            await refresh();
         } catch (err) {
             setError(String(err));
+        } finally {
+            setRequestingPermission(null);
+        }
+    }
+
+    async function requestScreenRecordingPermission() {
+        setError('');
+        setRequestingPermission('screenRecording');
+        try {
+            const nextStatus = await RequestScreenRecordingPermission();
+            setPlatformStatus(nextStatus);
+        } catch (err) {
+            setError(String(err));
+        } finally {
+            setRequestingPermission(null);
         }
     }
 
@@ -1339,9 +1402,7 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
 
     function normalizeGeneralSettings(settings: { themeMode?: string; language?: string; typingTrendEnabled?: boolean; startAtLogin?: boolean; soundName?: string; flowToggleHotkey?: string } = {}): GeneralSettings {
         const themeMode = settings.themeMode === 'light' || settings.themeMode === 'dark' ? settings.themeMode : 'auto';
-        const soundName = settings.soundName && soundOptions.includes(settings.soundName)
-            ? settings.soundName
-            : noSoundName;
+        const soundName = resolveSoundName(settings.soundName);
         return {
             themeMode,
             language: normalizeLanguage(settings.language),
@@ -1350,6 +1411,65 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             soundName,
             flowToggleHotkey: settings.flowToggleHotkey || '',
         };
+    }
+
+    function soundAudioContext() {
+        if (!soundAudioContextRef.current) {
+            soundAudioContextRef.current = new AudioContext({ latencyHint: 'interactive' });
+        }
+        return soundAudioContextRef.current;
+    }
+
+    function prepareSound(soundName: string) {
+        const prepared = preparedSoundsRef.current.get(soundName);
+        if (prepared) {
+            return Promise.resolve(prepared);
+        }
+        const pending = soundPreparationRef.current.get(soundName);
+        if (pending) {
+            return pending;
+        }
+        const soundURL = soundURLs[soundName];
+        if (!soundURL) {
+            return Promise.resolve(null);
+        }
+        const preparation = fetch(soundURL)
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error(`Failed to load sound: ${response.status}`);
+                }
+                return response.arrayBuffer();
+            })
+            .then((data) => soundAudioContext().decodeAudioData(data))
+            .then((buffer) => {
+                const result = {
+                    buffer,
+                    startOffset: audibleStartOffset(buffer),
+                };
+                preparedSoundsRef.current.set(soundName, result);
+                return result;
+            })
+            .catch(() => null)
+            .finally(() => {
+                soundPreparationRef.current.delete(soundName);
+            });
+        soundPreparationRef.current.set(soundName, preparation);
+        return preparation;
+    }
+
+    function playPreparedSound(prepared: PreparedSound) {
+        const context = soundAudioContext();
+        const start = () => {
+            const source = context.createBufferSource();
+            source.buffer = prepared.buffer;
+            source.connect(context.destination);
+            source.start(0, prepared.startOffset);
+        };
+        if (context.state === 'suspended') {
+            void context.resume().then(start).catch(() => undefined);
+            return;
+        }
+        start();
     }
 
     function playCompletionSound(selectedSoundName = soundNameRef.current) {
@@ -1361,6 +1481,12 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         if (!soundURL) {
             return;
         }
+        const prepared = preparedSoundsRef.current.get(soundName);
+        if (prepared) {
+            playPreparedSound(prepared);
+            return;
+        }
+        void prepareSound(soundName);
         const audio = soundName === soundNameRef.current && soundAudioRef.current
             ? soundAudioRef.current
             : new Audio(soundURL);
@@ -1967,7 +2093,6 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             }
             setAIResult(isEdit ? '' : (result.supportReport || ''));
             setAIReplacement(isEdit ? result.replacement : '');
-            playCompletionSound();
 
             // Speak if enabled
             // @ts-ignore
@@ -2642,8 +2767,12 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                             {isMacOS && <div className="action-row">
                                 <button onClick={refreshPlatformStatus}>{t('refresh')}</button>
                                 <button
-                                    className={platformStatus?.accessibilityTrusted ? undefined : 'primary-button'}
-                                    onClick={requestAccessibilityPermission}
+                                    className={
+                                        platformStatus?.accessibilityTrusted && platformStatus?.screenRecordingGranted
+                                            ? undefined
+                                            : 'primary-button'
+                                    }
+                                    onClick={() => setIsPermissionModalOpen(true)}
                                 >
                                     {t('requestPermission')}
                                 </button>
@@ -2654,14 +2783,18 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                                 <span>{t('accessibilityPermission')}</span>
                                 <strong>{platformStatus?.accessibilityTrusted ? t('granted') : t('required')}</strong>
                             </div>}
-                            {isMacOS && <div>
-                                <span>{t('secureInput')}</span>
-                                <strong>{platformStatus?.secureInputActive ? t('active') : t('notDetected')}</strong>
+                            {isMacOS && <div className={platformStatus?.screenRecordingGranted ? 'settings-status success' : 'settings-status danger'}>
+                                <span>{t('screenRecordingPermission')}</span>
+                                <strong>{platformStatus?.screenRecordingGranted ? t('granted') : t('required')}</strong>
                             </div>}
                             <div>
                                 <span>{t('aiActiveStatus')}</span>
                                 <strong>{aiSettings?.enabled ? t('enabled') : t('disabled')}</strong>
                             </div>
+                            {isMacOS && <div>
+                                <span>{t('secureInput')}</span>
+                                <strong>{platformStatus?.secureInputActive ? t('active') : t('notDetected')}</strong>
+                            </div>}
                         </div>
                         {aiSettings && (
                             <form
@@ -3231,6 +3364,78 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                     </div>
                 )}
             </main>
+
+            {isPermissionModalOpen && (
+                <div
+                    className="modal-backdrop permission-modal-backdrop"
+                    onClick={(event) => {
+                        if (event.currentTarget === event.target) {
+                            setIsPermissionModalOpen(false);
+                        }
+                    }}
+                >
+                    <section
+                        className="modal permission-modal"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="permission-modal-title"
+                        aria-describedby="permission-modal-description"
+                    >
+                        <div className="permission-modal-header">
+                            <div className="permission-modal-icon" aria-hidden="true">
+                                <span className="material-symbols-rounded">verified_user</span>
+                            </div>
+                            <div>
+                                <h2 id="permission-modal-title">{t('macOSPermissions')}</h2>
+                                <p id="permission-modal-description">{t('macOSPermissionsDescription')}</p>
+                            </div>
+                        </div>
+                        <div className="permission-options">
+                            <section className="permission-option">
+                                <div className="permission-option-heading">
+                                    <div>
+                                        <h3>{t('accessibilityPermission')}</h3>
+                                        <span className={platformStatus?.accessibilityTrusted ? 'permission-state granted' : 'permission-state required'}>
+                                            {platformStatus?.accessibilityTrusted ? t('granted') : t('required')}
+                                        </span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className={platformStatus?.accessibilityTrusted ? undefined : 'primary-button'}
+                                        disabled={platformStatus?.accessibilityTrusted || requestingPermission !== null}
+                                        onClick={requestAccessibilityPermission}
+                                    >
+                                        {platformStatus?.accessibilityTrusted ? t('granted') : t('grantAccess')}
+                                    </button>
+                                </div>
+                                <p>{t('accessibilityPermissionDescription')}</p>
+                            </section>
+                            <section className="permission-option">
+                                <div className="permission-option-heading">
+                                    <div>
+                                        <h3>{t('screenRecordingPermission')}</h3>
+                                        <span className={platformStatus?.screenRecordingGranted ? 'permission-state granted' : 'permission-state required'}>
+                                            {platformStatus?.screenRecordingGranted ? t('granted') : t('required')}
+                                        </span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className={platformStatus?.screenRecordingGranted ? undefined : 'primary-button'}
+                                        disabled={platformStatus?.screenRecordingGranted || requestingPermission !== null}
+                                        onClick={requestScreenRecordingPermission}
+                                    >
+                                        {platformStatus?.screenRecordingGranted ? t('granted') : t('grantAccess')}
+                                    </button>
+                                </div>
+                                <p>{t('screenRecordingPermissionDescription')}</p>
+                            </section>
+                        </div>
+                        <div className="modal-actions permission-modal-actions">
+                            <button type="button" onClick={() => setIsPermissionModalOpen(false)}>{t('close')}</button>
+                        </div>
+                    </section>
+                </div>
+            )}
 
             {isModalOpen && (
                 <div className="modal-backdrop">

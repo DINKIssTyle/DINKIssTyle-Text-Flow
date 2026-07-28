@@ -1,13 +1,14 @@
 package platform
 
 type Status struct {
-	AccessibilityTrusted bool   `json:"accessibilityTrusted"`
-	SecureInputActive    bool   `json:"secureInputActive"`
-	ActiveAppName        string `json:"activeAppName"`
-	ActiveBundleID       string `json:"activeBundleId"`
-	FlowEngineRunning    bool   `json:"flowEngineRunning"`
-	FlowPaused           bool   `json:"flowPaused"`
-	Message              string `json:"message"`
+	AccessibilityTrusted   bool   `json:"accessibilityTrusted"`
+	ScreenRecordingGranted bool   `json:"screenRecordingGranted"`
+	SecureInputActive      bool   `json:"secureInputActive"`
+	ActiveAppName          string `json:"activeAppName"`
+	ActiveBundleID         string `json:"activeBundleId"`
+	FlowEngineRunning      bool   `json:"flowEngineRunning"`
+	FlowPaused             bool   `json:"flowPaused"`
+	Message                string `json:"message"`
 }
 
 type AppInfo struct {
@@ -24,6 +25,10 @@ type Controller interface {
 
 func RequestAccessibilityPermission() bool {
 	return requestAccessibilityPermission()
+}
+
+func RequestScreenRecordingPermission() bool {
+	return requestScreenRecordingPermission()
 }
 
 func SelectedText() (string, error) {
@@ -61,4 +66,3 @@ func IsFocusedElementEditable() bool {
 func IsFocusedElementEditableForProcess(processID int) bool {
 	return isFocusedElementEditableForProcess(processID)
 }
-

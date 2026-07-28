@@ -1996,6 +1996,119 @@ h2 {
     box-shadow: 0 22px 60px var(--modal-shadow);
 }
 
+.permission-modal-backdrop {
+    z-index: 20;
+    place-items: center;
+}
+
+.permission-modal {
+    width: min(560px, 100%);
+    gap: 16px;
+    padding: 20px;
+    animation: modal-scale-in 0.2s cubic-bezier(0.34, 1.2, 0.64, 1) both;
+}
+
+.permission-modal-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.permission-modal-header h2,
+.permission-option h3 {
+    margin: 0;
+}
+
+.permission-modal-header p,
+.permission-option p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.permission-modal-icon {
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--active-bg);
+    color: var(--primary);
+}
+
+.permission-modal-icon .material-symbols-rounded {
+    font-size: 23px;
+}
+
+.permission-options {
+    display: grid;
+    gap: 10px;
+}
+
+.permission-option {
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--subtle-bg);
+}
+
+.permission-option-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.permission-option-heading > div {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.permission-option h3 {
+    font-size: 15px;
+    line-height: 1.3;
+}
+
+.permission-option button {
+    flex: 0 0 auto;
+    min-width: 98px;
+    height: 30px;
+    padding: 0 12px;
+    font-weight: 600;
+}
+
+.permission-option button:disabled {
+    cursor: default;
+    opacity: 0.7;
+}
+
+.permission-state {
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.permission-state.granted {
+    color: var(--good);
+}
+
+.permission-state.required {
+    color: var(--danger);
+}
+
+.permission-modal-actions {
+    justify-content: flex-end;
+    padding-top: 2px;
+}
+
+.permission-modal-actions button {
+    min-width: 72px;
+}
+
 .snippet-modal {
     height: min(720px, calc(100vh - 36px));
     grid-template-rows: auto auto minmax(132px, 1fr) auto auto auto;

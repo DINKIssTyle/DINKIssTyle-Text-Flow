@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -57,22 +58,34 @@ var (
 		Data1: 0x30c3d08a, Data2: 0xae8d, Data3: 0x4f77,
 		Data4: [8]byte{0xa8, 0xa7, 0xa5, 0x77, 0x05, 0xc7, 0xec, 0xd8},
 	}
+	replacementClipboardState = struct {
+		sync.Mutex
+		generation    uint64
+		snapshot      string
+		snapshotValid bool
+		pending       bool
+	}{}
 )
 
 func CurrentStatus() Status {
 	pid := getFrontmostPID()
 	info := appInfoFromProcess(pid)
 	return Status{
-		AccessibilityTrusted: true,
-		SecureInputActive:    false,
-		ActiveAppName:        info.Name,
-		ActiveBundleID:       info.BundleID,
-		FlowEngineRunning:    false,
-		Message:              "Windows support is active. Some automation features may depend on the focused application.",
+		AccessibilityTrusted:   true,
+		ScreenRecordingGranted: true,
+		SecureInputActive:      false,
+		ActiveAppName:          info.Name,
+		ActiveBundleID:         info.BundleID,
+		FlowEngineRunning:      false,
+		Message:                "Windows support is active. Some automation features may depend on the focused application.",
 	}
 }
 
 func requestAccessibilityPermission() bool {
+	return true
+}
+
+func requestScreenRecordingPermission() bool {
 	return true
 }
 
@@ -106,17 +119,44 @@ func replaceSelectedTextInProcess(processID int, replacement string, preferPaste
 		return nil
 	}
 
+	replacementClipboardState.Lock()
+	defer replacementClipboardState.Unlock()
+
 	previous, previousErr := readClipboardText()
 	if err := writeClipboardText(replacement); err != nil {
 		return err
 	}
 	_ = activateProcess(processID)
 	sendCtrlKey(vkV)
-	time.Sleep(clipboardPasteSettleDuration)
-	if previousErr == nil {
-		_ = writeClipboardText(previous)
+	replacementClipboardState.generation++
+	generation := replacementClipboardState.generation
+	if !replacementClipboardState.pending {
+		replacementClipboardState.snapshot = previous
+		replacementClipboardState.snapshotValid = previousErr == nil
+		replacementClipboardState.pending = true
 	}
+	go restoreReplacementClipboard(generation, replacement)
 	return nil
+}
+
+func restoreReplacementClipboard(generation uint64, replacement string) {
+	time.Sleep(clipboardPasteSettleDuration)
+
+	replacementClipboardState.Lock()
+	defer replacementClipboardState.Unlock()
+	if generation != replacementClipboardState.generation {
+		return
+	}
+	snapshot := replacementClipboardState.snapshot
+	snapshotValid := replacementClipboardState.snapshotValid
+	replacementClipboardState.snapshot = ""
+	replacementClipboardState.snapshotValid = false
+	replacementClipboardState.pending = false
+
+	current, err := readClipboardText()
+	if snapshotValid && err == nil && current == replacement {
+		_ = writeClipboardText(snapshot)
+	}
 }
 
 func activateProcess(processID int) error {
@@ -401,4 +441,3 @@ func isFocusedElementEditableForProcess(processID int) bool {
 
 	return false
 }
-

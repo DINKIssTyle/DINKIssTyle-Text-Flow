@@ -21,6 +21,20 @@ static int DKSTRequestAccessibilityPermission(void) {
     return AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
 }
 
+static int DKSTScreenRecordingGranted(void) {
+    if (@available(macOS 10.15, *)) {
+        return CGPreflightScreenCaptureAccess();
+    }
+    return 1;
+}
+
+static int DKSTRequestScreenRecordingPermission(void) {
+    if (@available(macOS 10.15, *)) {
+        return CGRequestScreenCaptureAccess();
+    }
+    return 1;
+}
+
 static char* DKSTFrontmostAppName(void) {
     NSRunningApplication *app = [[NSWorkspace sharedWorkspace] frontmostApplication];
     NSString *value = [app localizedName] ?: @"";
@@ -411,6 +425,9 @@ static void DKSTRestorePasteboard(NSPasteboard *pasteboard, NSArray<NSDictionary
     [pasteboard writeObjects:items];
 }
 
+static NSArray<NSDictionary<NSPasteboardType, NSData *> *> *DKSTPendingPasteboardSnapshot = nil;
+static NSUInteger DKSTPasteGeneration = 0;
+
 static void DKSTPostModifierKeyUpsToPID(pid_t pid) {
     CGKeyCode modifiers[] = {56, 60, 59, 62, 58, 61, 55, 54};
     size_t count = sizeof(modifiers) / sizeof(modifiers[0]);
@@ -668,7 +685,10 @@ static int DKSTReplaceSelectedTextForPID(pid_t pid, const char *replacement, int
     __block int didPaste = 0;
     void (^pasteBlock)(void) = ^{
         NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
-        NSArray<NSDictionary<NSPasteboardType, NSData *> *> *oldItems = DKSTSnapshotPasteboard(pasteboard);
+        if (DKSTPendingPasteboardSnapshot == nil) {
+            DKSTPendingPasteboardSnapshot = DKSTSnapshotPasteboard(pasteboard);
+        }
+        NSUInteger pasteGeneration = ++DKSTPasteGeneration;
 
         NSString *text = [NSString stringWithUTF8String:replacement] ?: @"";
         [pasteboard clearContents];
@@ -681,15 +701,21 @@ static int DKSTReplaceSelectedTextForPID(pid_t pid, const char *replacement, int
         DKSTPostModifierKeyUpsToPID(pid);
         usleep(80000);
         DKSTPostPasteShortcutToPID(pid);
-        usleep(preferPaste == 1 ? 1000000 : 750000);
         DKSTPostModifierKeyUpsToPID(pid);
 
-        // A slow target must read the replacement before the previous clipboard is restored.
-        // If the user copied something meanwhile, preserve their newer clipboard instead.
-        if ([pasteboard changeCount] == replacementChangeCount) {
-            DKSTRestorePasteboard(pasteboard, oldItems);
-        }
-        [oldItems release];
+        // Let slow targets read the replacement before restoring the previous clipboard,
+        // without delaying the replacement completion signal returned to the UI.
+        int64_t restoreDelay = preferPaste == 1 ? 1000000000LL : 750000000LL;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, restoreDelay), dispatch_get_main_queue(), ^{
+            if (pasteGeneration != DKSTPasteGeneration) {
+                return;
+            }
+            if ([pasteboard changeCount] == replacementChangeCount) {
+                DKSTRestorePasteboard(pasteboard, DKSTPendingPasteboardSnapshot);
+            }
+            [DKSTPendingPasteboardSnapshot release];
+            DKSTPendingPasteboardSnapshot = nil;
+        });
         didPaste = 1;
     };
 
@@ -753,17 +779,22 @@ func CurrentStatus() Status {
 	}
 
 	return Status{
-		AccessibilityTrusted: trusted,
-		SecureInputActive:    false,
-		ActiveAppName:        name,
-		ActiveBundleID:       bundleID,
-		FlowEngineRunning:    false,
-		Message:              message,
+		AccessibilityTrusted:   trusted,
+		ScreenRecordingGranted: C.DKSTScreenRecordingGranted() == 1,
+		SecureInputActive:      false,
+		ActiveAppName:          name,
+		ActiveBundleID:         bundleID,
+		FlowEngineRunning:      false,
+		Message:                message,
 	}
 }
 
 func requestAccessibilityPermission() bool {
 	return C.DKSTRequestAccessibilityPermission() == 1
+}
+
+func requestScreenRecordingPermission() bool {
+	return C.DKSTRequestScreenRecordingPermission() == 1
 }
 
 func selectedText() (string, error) {

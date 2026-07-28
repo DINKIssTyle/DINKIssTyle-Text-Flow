@@ -12,6 +12,10 @@ func requestAccessibilityPermission() bool {
 	return false
 }
 
+func requestScreenRecordingPermission() bool {
+	return false
+}
+
 func selectedText() (string, error) {
 	return "", nil
 }
@@ -43,4 +47,3 @@ func getFrontmostPID() int {
 func isFocusedElementEditableForProcess(processID int) bool {
 	return false
 }
-

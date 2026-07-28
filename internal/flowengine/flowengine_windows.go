@@ -327,13 +327,9 @@ func handleKeyboardInput(input keyboardInput) {
 
 	keyboardEngine.mu.Lock()
 	generation := keyboardEngine.generation
-	onExpansion := keyboardEngine.onExpansion
 	keyboardEngine.mu.Unlock()
 	if !executionActive(generation) {
 		return
-	}
-	if onExpansion != nil {
-		onExpansion(match.Snippet)
 	}
 
 	deleteKeys := deleteKeysForMatch(buffer, text, match.Snippet.Shortcut, match.Snippet.CaseSensitive, delimiterTyped)
@@ -358,6 +354,12 @@ func handleKeyboardInput(input keyboardInput) {
 		time.Sleep(backspaceSettleDuration(count))
 		if !executeSnippetActions(renderSnippetActions(snippet.Content), snippet.UsePaste, generation) {
 			return
+		}
+		keyboardEngine.mu.Lock()
+		onExpansion := keyboardEngine.onExpansion
+		keyboardEngine.mu.Unlock()
+		if onExpansion != nil {
+			onExpansion(snippet)
 		}
 		_ = store.LogExpansion(snippet.ID, "")
 	}(match.Snippet, deleteCount, generation)

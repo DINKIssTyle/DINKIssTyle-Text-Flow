@@ -311,6 +311,11 @@ func (a *App) RequestAccessibilityPermission() platform.Status {
 	return a.reconcileFlowStatus(true)
 }
 
+func (a *App) RequestScreenRecordingPermission() platform.Status {
+	platform.RequestScreenRecordingPermission()
+	return a.reconcileFlowStatus(false)
+}
+
 func (a *App) ToggleFlowPaused() platform.Status {
 	a.flowStateMu.Lock()
 	a.flowPaused = !a.flowPaused
@@ -950,6 +955,9 @@ func (a *App) showAIPrompt(sourceProcessID int, requireEnabled bool) {
 	appInst := application.Get()
 	if aiWin, ok := appInst.Window.GetByName("ai"); ok {
 		application.InvokeSync(func() {
+			if mainWin, mainWindowExists := appInst.Window.GetByName("main"); mainWindowExists {
+				mainWin.Hide()
+			}
 			aiWin.SetMinSize(460, 74)
 			aiWin.SetSize(460, 74)
 			aiWin.Center()

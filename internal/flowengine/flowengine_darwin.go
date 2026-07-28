@@ -145,13 +145,6 @@ func DKSTKeyboardInput(value *C.char, backspace C.int) {
 	if !executionActive(generation) {
 		return
 	}
-	keyboardEngine.mu.Lock()
-	onExpansion := keyboardEngine.onExpansion
-	keyboardEngine.mu.Unlock()
-	if onExpansion != nil {
-		onExpansion(match.Snippet)
-	}
-
 	deleteKeys := deleteKeysForMatch(buffer, text, match.Snippet.Shortcut, match.Snippet.CaseSensitive, delimiterTyped)
 	deleteCount := shortcutDeleteCount(deleteKeys)
 	if delimiterTyped && strings.HasSuffix(buffer, text) {
@@ -165,6 +158,12 @@ func DKSTKeyboardInput(value *C.char, backspace C.int) {
 	time.Sleep(backspaceSettleDuration(deleteCount))
 	if !executeSnippetActions(renderSnippetActions(match.Snippet.Content), match.Snippet.UsePaste, generation) {
 		return
+	}
+	keyboardEngine.mu.Lock()
+	onExpansion := keyboardEngine.onExpansion
+	keyboardEngine.mu.Unlock()
+	if onExpansion != nil {
+		onExpansion(match.Snippet)
 	}
 	_ = store.LogExpansion(match.Snippet.ID, "")
 }
