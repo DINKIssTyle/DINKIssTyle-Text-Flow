@@ -122,9 +122,22 @@ func TestRunAppleIntelligenceAssistPropagatesGenerationError(t *testing.T) {
 	}
 }
 
-func TestNormalizeSettingsPreservesAppleIntelligenceProvider(t *testing.T) {
-	settings := NormalizeSettings(Settings{Provider: ProviderAppleIntelligence})
-	if settings.Provider != ProviderAppleIntelligence {
-		t.Fatalf("provider was normalized to %q", settings.Provider)
+func TestNormalizeSettingsHandlesAppleIntelligenceProviderForPlatform(t *testing.T) {
+	tests := []struct {
+		goos string
+		want string
+	}{
+		{goos: "darwin", want: ProviderAppleIntelligence},
+		{goos: "windows", want: ProviderOpenAI},
+		{goos: "linux", want: ProviderOpenAI},
+	}
+
+	for _, test := range tests {
+		t.Run(test.goos, func(t *testing.T) {
+			got := normalizeProvider(ProviderAppleIntelligence, test.goos)
+			if got != test.want {
+				t.Fatalf("provider was normalized to %q on %s, want %q", got, test.goos, test.want)
+			}
+		})
 	}
 }

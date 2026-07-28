@@ -121,18 +121,7 @@ func DefaultSettings() Settings {
 func NormalizeSettings(settings Settings) Settings {
 	defaults := DefaultSettings()
 
-	settings.Provider = strings.TrimSpace(settings.Provider)
-	if settings.Provider == "" {
-		settings.Provider = defaults.Provider
-	}
-	if settings.Provider != ProviderOpenAI &&
-		settings.Provider != ProviderLMStudio &&
-		settings.Provider != ProviderAppleIntelligence {
-		settings.Provider = ProviderOpenAI
-	}
-	if runtime.GOOS != "darwin" && settings.Provider == ProviderAppleIntelligence {
-		settings.Provider = ProviderOpenAI
-	}
+	settings.Provider = normalizeProvider(settings.Provider, runtime.GOOS)
 
 	settings.Endpoint = strings.TrimSpace(settings.Endpoint)
 	if settings.Endpoint == "" {
@@ -214,4 +203,20 @@ func NormalizeSettings(settings Settings) Settings {
 	}
 
 	return settings
+}
+
+func normalizeProvider(provider string, goos string) string {
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		provider = ProviderOpenAI
+	}
+	if provider != ProviderOpenAI &&
+		provider != ProviderLMStudio &&
+		provider != ProviderAppleIntelligence {
+		provider = ProviderOpenAI
+	}
+	if goos != "darwin" && provider == ProviderAppleIntelligence {
+		provider = ProviderOpenAI
+	}
+	return provider
 }
