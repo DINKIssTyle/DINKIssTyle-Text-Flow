@@ -3058,8 +3058,8 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                                                 ? 'aiHistoryUnavailableHint'
                                                 : 'aiHistoryHint')}
                                     </span>
-                                    <hr className="settings-divider" />
                                     {isMacOS && <>
+                                        <hr className="settings-divider" />
                                         <div className="settings-section-header">
                                             <h3>{t('appCompatibility')}</h3>
                                             <p>{t('appCompatibilityDescription')}</p>
