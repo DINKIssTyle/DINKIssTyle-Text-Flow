@@ -1291,6 +1291,11 @@ h2 {
     background: var(--subtle-bg);
 }
 
+.ai-result p,
+.ai-result pre {
+    font-family: inherit;
+}
+
 .ai-result pre {
     overflow: auto;
     margin: 0;
