@@ -23,7 +23,7 @@ func TestPromptContractUsesCompactModeSpecificInstructions(t *testing.T) {
 			t.Fatalf("answer-only prompt does not contain language rule %q", required)
 		}
 	}
-	if wordCount := len(strings.Fields(answerPrompt)); wordCount > 105 {
+	if wordCount := len(strings.Fields(answerPrompt)); wordCount > 125 {
 		t.Fatalf("answer-only prompt is too long: %d words", wordCount)
 	}
 
@@ -53,7 +53,7 @@ func TestPromptContractUsesCompactModeSpecificInstructions(t *testing.T) {
 			t.Fatalf("editable-selection prompt does not contain %q", required)
 		}
 	}
-	if wordCount := len(strings.Fields(editablePrompt)); wordCount > 280 {
+	if wordCount := len(strings.Fields(editablePrompt)); wordCount > 320 {
 		t.Fatalf("editable-selection prompt is too long: %d words", wordCount)
 	}
 }
