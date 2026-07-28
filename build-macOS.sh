@@ -6,7 +6,7 @@ APP_NAME="DKST Text Flow"
 BUILD_BIN_DIR="bin"
 APP_PATH="$ROOT_DIR/$BUILD_BIN_DIR/$APP_NAME.app"
 ENTITLEMENTS_PATH="$ROOT_DIR/build/darwin/entitlements.plist"
-DEFAULT_IDENTITY="Apple Development: dinki@me.com (48Z2CKZS59)"
+DEFAULT_IDENTITY="auto"
 
 usage() {
   cat <<USAGE
@@ -16,8 +16,8 @@ Builds DKST Text Flow and signs the .app with a stable codesigning identity.
 
 Options:
   --run             Restart the built app after signing.
-  --identity VALUE  Codesign identity. Defaults to:
-                    $DEFAULT_IDENTITY
+  --identity VALUE  Codesign identity, SHA-1 hash, "auto", or "-".
+                    Defaults to automatic selection.
 
 Environment:
   DKST_CODESIGN_IDENTITY  Alternative way to set the signing identity.
@@ -95,26 +95,63 @@ fi
 if [[ "$IDENTITY" == "-" ]]; then
   echo "Using ad-hoc codesigning (-)."
 else
+  AVAILABLE_IDENTITIES="$(security find-identity -v -p codesigning 2>&1 || true)"
+
   # Resolve a certificate name to its SHA-1 hash. This avoids codesign's
   # "ambiguous identity" error when an expired certificate has the same name.
-  RESOLVED_IDENTITY="$(
-    security find-identity -v -p codesigning |
+  resolve_identity() {
+    local requested_identity="$1"
+    printf '%s\n' "$AVAILABLE_IDENTITIES" |
       sed -n 's/^[[:space:]]*[0-9][0-9]*) \([0-9A-Fa-f]\{40\}\) "\(.*\)"$/\1	\2/p' |
       while IFS=$'\t' read -r certificate_hash certificate_name; do
-        if [[ "$IDENTITY" == "$certificate_hash" || "$IDENTITY" == "$certificate_name" ]]; then
-          printf '%s' "$certificate_hash"
-          break
+        if [[ "$requested_identity" == "$certificate_hash" || "$requested_identity" == "$certificate_name" ]]; then
+          printf '%s\t%s' "$certificate_hash" "$certificate_name"
+          return
         fi
       done
-  )"
+  }
 
-  if [[ -n "$RESOLVED_IDENTITY" ]]; then
-    echo "Using codesigning identity: $IDENTITY ($RESOLVED_IDENTITY)"
+  select_identity_by_prefix() {
+    local prefix="$1"
+    printf '%s\n' "$AVAILABLE_IDENTITIES" |
+      sed -n 's/^[[:space:]]*[0-9][0-9]*) \([0-9A-Fa-f]\{40\}\) "\(.*\)"$/\1	\2/p' |
+      while IFS=$'\t' read -r certificate_hash certificate_name; do
+        if [[ "$certificate_name" == "$prefix"* ]]; then
+          printf '%s\t%s' "$certificate_hash" "$certificate_name"
+          return
+        fi
+      done
+  }
+
+  RESOLVED_CERTIFICATE=""
+  if [[ "$IDENTITY" != "auto" ]]; then
+    RESOLVED_CERTIFICATE="$(resolve_identity "$IDENTITY")"
+    if [[ -z "$RESOLVED_CERTIFICATE" ]]; then
+      echo "Valid codesign identity not found: $IDENTITY" >&2
+      echo "Trying automatic identity selection." >&2
+    fi
+  fi
+
+  if [[ -z "$RESOLVED_CERTIFICATE" ]]; then
+    for certificate_prefix in \
+      "Developer ID Application:" \
+      "Apple Development:" \
+      "Apple Distribution:"; do
+      RESOLVED_CERTIFICATE="$(select_identity_by_prefix "$certificate_prefix")"
+      if [[ -n "$RESOLVED_CERTIFICATE" ]]; then
+        break
+      fi
+    done
+  fi
+
+  if [[ -n "$RESOLVED_CERTIFICATE" ]]; then
+    IFS=$'\t' read -r RESOLVED_IDENTITY RESOLVED_IDENTITY_NAME <<< "$RESOLVED_CERTIFICATE"
+    echo "Using codesigning identity: $RESOLVED_IDENTITY_NAME ($RESOLVED_IDENTITY)"
     IDENTITY="$RESOLVED_IDENTITY"
   else
-    echo "Valid codesign identity not found: $IDENTITY" >&2
+    echo "No valid codesign identity was found." >&2
     echo "Available identities:" >&2
-    security find-identity -v -p codesigning >&2 || true
+    printf '%s\n' "$AVAILABLE_IDENTITIES" >&2
     echo "Falling back to ad-hoc codesigning (-)." >&2
     IDENTITY="-"
   fi

@@ -115,5 +115,3 @@ DerivedData/
 # ==========================================
 Note/
 bin/DKST Text Flow
-internal/ai/prompt_test.go
-internal/ai/apple_intelligence_test.go
