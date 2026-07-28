@@ -551,9 +551,9 @@ button:not(:disabled):focus-visible {
 }
 
 .hud-result {
-    max-height: 220px;
-    grid-template-rows: minmax(0, 1fr) auto;
-    overflow: hidden;
+    max-height: none;
+    grid-template-rows: auto auto;
+    overflow: visible;
     margin-top: 0;
     padding: 11px 12px;
     border-radius: 10px;
@@ -564,7 +564,7 @@ button:not(:disabled):focus-visible {
 
 .hud-result-content {
     min-height: 0;
-    overflow: auto;
+    overflow: visible;
 }
 
 .hud-result-footer {
