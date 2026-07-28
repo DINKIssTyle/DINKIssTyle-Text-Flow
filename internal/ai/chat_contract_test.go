@@ -46,7 +46,14 @@ func TestRunAssistUsesAnswerOnlyContractWithoutEditableSelection(t *testing.T) {
 
 func TestRunAssistUsesStructuredContractForEditableSelection(t *testing.T) {
 	content := "```go\nfunc main() {}\n```"
-	client := &recordingChatClient{response: chatCompletionResponse(t, "REPLACE\n"+content)}
+	structuredContent, err := json.Marshal(structuredAssistResponse{
+		Mode:    "REPLACE",
+		Content: content,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingChatClient{response: chatCompletionResponse(t, string(structuredContent))}
 	settings := DefaultSettings()
 	settings.Enabled = true
 	settings.Model = "test-model"

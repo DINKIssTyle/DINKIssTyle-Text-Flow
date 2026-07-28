@@ -1,6 +1,9 @@
 package ai
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 type contractAppleIntelligenceClient struct {
 	instructions string
@@ -37,8 +40,15 @@ func TestAppleAssistUsesTheSameModeSpecificPromptContract(t *testing.T) {
 		t.Fatal("Apple Intelligence did not use the answer-only prompt")
 	}
 
+	editResponse, err := json.Marshal(structuredAssistResponse{
+		Mode:    "REPLACE",
+		Content: "Corrected text.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	editClient := &contractAppleIntelligenceClient{
-		response: "REPLACE\nCorrected text.",
+		response: string(editResponse),
 	}
 	edit, err := RunAppleIntelligenceAssist(editClient, settings, AssistRequest{
 		Instruction: "Correct this.",

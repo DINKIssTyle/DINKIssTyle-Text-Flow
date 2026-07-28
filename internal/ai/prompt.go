@@ -51,8 +51,10 @@ var editableSelectionSystemPromptLines = []string{
 	"REPLACE language: use the requested target; translation uses its target; otherwise preserve the selected content's language.",
 	"Preserve syntax, delimiters, whitespace, formatting, and code fences unless the task changes them.",
 	"Apply appRules as lower-priority guidance.",
-	"Return exactly two parts: first a line containing only FORCE_REPLACE, REPLACE, or ANSWER, then the content.",
-	"Do not wrap this protocol in a code fence.",
+	`Return exactly one valid JSON object with this schema: {"mode":"FORCE_REPLACE|REPLACE|ANSWER","content":"completed content"}.`,
+	"Use exactly one allowed mode value and encode all line breaks and special characters in content as valid JSON.",
+	"Content must contain only the completed content; never repeat FORCE_REPLACE, REPLACE, or ANSWER inside content.",
+	"Return no Markdown fence, commentary, or text outside the JSON object.",
 }
 
 var explicitReplacementFragments = []string{
@@ -176,8 +178,8 @@ func containsExplicitReplacementDirective(instruction string) bool {
 
 func ParseAssistResultForRequest(rawText string, request AssistRequest) AssistResult {
 	canReplace := CanReplaceSelectedText(request)
-	result := ParseAssistResult(rawText, canReplace)
-	if !RequiresForcedReplacement(request) {
+	result, parsedEnvelope := parseAssistResult(rawText, canReplace)
+	if !RequiresForcedReplacement(request) || !parsedEnvelope {
 		return result
 	}
 
@@ -196,55 +198,66 @@ func ParseAssistResultForRequest(rawText string, request AssistRequest) AssistRe
 }
 
 func ParseAssistResult(rawText string, canReplace bool) AssistResult {
+	result, _ := parseAssistResult(rawText, canReplace)
+	return result
+}
+
+func parseAssistResult(rawText string, canReplace bool) (AssistResult, bool) {
 	source := strings.TrimSpace(rawText)
 	if source == "" {
 		return AssistResult{
 			Intent:        IntentQuestion,
 			SupportReport: invalidResponseMessage,
-		}
-	}
-
-	if !canReplace {
-		return AssistResult{
-			Intent:        IntentQuestion,
-			SupportReport: source,
-		}
+		}, false
 	}
 
 	if mode, content, ok := parseModeEnvelope(source); ok {
-		return assistResultForMode(mode, content)
+		return parsedAssistResult(mode, content, canReplace), true
 	}
 
 	candidate := stripJSONEnvelopeFence(source)
 	var response structuredAssistResponse
 	if err := json.Unmarshal([]byte(candidate), &response); err == nil {
 		if normalizeResponseMode(response.Mode) != "" {
-			return assistResultForMode(response.Mode, response.Content)
+			return parsedAssistResult(response.Mode, response.Content, canReplace), true
 		}
 
 		var legacy legacyAssistResponse
 		if err := json.Unmarshal([]byte(candidate), &legacy); err == nil {
 			legacyMode := normalizeResponseMode(legacy.Intent)
 			if legacyMode == "replace" || legacyMode == "force_replace" {
-				return assistResultForMode(legacyMode, legacy.Replacement)
+				return parsedAssistResult(legacyMode, legacy.Replacement, canReplace), true
 			}
 			if legacyMode == "answer" {
-				return assistResultForMode("answer", legacy.SupportReport)
+				return parsedAssistResult("answer", legacy.SupportReport, canReplace), true
 			}
 		}
 	}
 
 	if mode, content, ok := parseLegacyXMLEnvelope(source); ok {
-		return assistResultForMode(mode, content)
+		return parsedAssistResult(mode, content, canReplace), true
 	}
 
 	return AssistResult{
 		Intent:        IntentQuestion,
 		SupportReport: source,
+	}, false
+}
+
+func parsedAssistResult(mode string, content string, canReplace bool) AssistResult {
+	result := assistResultForMode(mode, content)
+	if canReplace || result.Intent != IntentEdit {
+		return result
+	}
+	return AssistResult{
+		Intent:        IntentQuestion,
+		SupportReport: result.Replacement,
 	}
 }
 
 func assistResultForMode(mode string, content string) AssistResult {
+	normalizedMode := normalizeResponseMode(mode)
+	content = stripRepeatedModeEnvelope(content, normalizedMode)
 	if strings.TrimSpace(content) == "" {
 		return AssistResult{
 			Intent:        IntentQuestion,
@@ -252,7 +265,6 @@ func assistResultForMode(mode string, content string) AssistResult {
 		}
 	}
 
-	normalizedMode := normalizeResponseMode(mode)
 	if normalizedMode == "replace" || normalizedMode == "force_replace" {
 		return AssistResult{
 			Intent:       IntentEdit,
@@ -265,6 +277,25 @@ func assistResultForMode(mode string, content string) AssistResult {
 		Intent:        IntentQuestion,
 		SupportReport: content,
 	}
+}
+
+func stripRepeatedModeEnvelope(content string, outerMode string) string {
+	for range 3 {
+		mode, nestedContent, ok := parseModeEnvelope(strings.TrimSpace(content))
+		if !ok || !sameResponseModeClass(outerMode, normalizeResponseMode(mode)) {
+			break
+		}
+		content = nestedContent
+	}
+	return content
+}
+
+func sameResponseModeClass(left string, right string) bool {
+	if left == right {
+		return true
+	}
+	return (left == "replace" || left == "force_replace") &&
+		(right == "replace" || right == "force_replace")
 }
 
 func parseModeEnvelope(source string) (string, string, bool) {

@@ -44,7 +44,10 @@ func TestPromptContractUsesCompactModeSpecificInstructions(t *testing.T) {
 		"foreign-language selection",
 		"REPLACE language",
 		"otherwise preserve the selected content's language",
-		"first a line containing only FORCE_REPLACE, REPLACE, or ANSWER",
+		"exactly one valid JSON object",
+		`{"mode":"FORCE_REPLACE|REPLACE|ANSWER","content":"completed content"}`,
+		"never repeat FORCE_REPLACE, REPLACE, or ANSWER inside content",
+		"no Markdown fence, commentary, or text outside the JSON object",
 	} {
 		if !strings.Contains(editablePrompt, required) {
 			t.Fatalf("editable-selection prompt does not contain %q", required)
@@ -221,11 +224,11 @@ func TestPromptContractDoesNotForceOrdinaryReplacement(t *testing.T) {
 	}
 }
 
-func TestPromptContractIgnoresForcedReplacementWithoutSelectionPermission(t *testing.T) {
+func TestPromptContractStripsRoutingMetadataWithoutSelectionPermission(t *testing.T) {
 	raw := "FORCE_REPLACE\nCorrected text."
 	result := ParseAssistResult(raw, false)
 	if result.Intent != IntentQuestion ||
-		result.SupportReport != raw ||
+		result.SupportReport != "Corrected text." ||
 		result.Replacement != "" ||
 		result.ForceReplace {
 		t.Fatalf("unexpected answer-only result: %#v", result)
@@ -255,7 +258,7 @@ func TestPromptContractParsesAnswerMarker(t *testing.T) {
 	}
 }
 
-func TestPromptContractKeepsJSONResponseCompatibility(t *testing.T) {
+func TestPromptContractParsesJSONResponse(t *testing.T) {
 	raw, err := json.Marshal(structuredAssistResponse{
 		Mode:    "replace",
 		Content: "Corrected text.",
@@ -265,7 +268,38 @@ func TestPromptContractKeepsJSONResponseCompatibility(t *testing.T) {
 	}
 	result := ParseAssistResult(string(raw), true)
 	if result.Intent != IntentEdit || result.Replacement != "Corrected text." {
-		t.Fatalf("unexpected legacy JSON result: %#v", result)
+		t.Fatalf("unexpected JSON result: %#v", result)
+	}
+}
+
+func TestPromptContractStripsRepeatedModeFromJSONContent(t *testing.T) {
+	raw, err := json.Marshal(structuredAssistResponse{
+		Mode:    "replace",
+		Content: "REPLACE\n韓文真的是一種很棒的文字。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := ParseAssistResult(string(raw), true)
+	if result.Intent != IntentEdit || result.Replacement != "韓文真的是一種很棒的文字。" {
+		t.Fatalf("unexpected repeated-mode result: %#v", result)
+	}
+}
+
+func TestPromptContractDoesNotInsertMalformedResponseForExplicitEdit(t *testing.T) {
+	raw := `{"mode":"REPLACE","content":"unterminated}`
+	request := AssistRequest{
+		Instruction: "이 문장으로 교체해",
+		ContextKind: ContextSelectedText,
+		ContextText: "old text",
+		CanReplace:  true,
+	}
+	result := ParseAssistResultForRequest(raw, request)
+	if result.Intent != IntentQuestion ||
+		result.SupportReport != raw ||
+		result.Replacement != "" ||
+		result.ForceReplace {
+		t.Fatalf("malformed response must not be inserted: %#v", result)
 	}
 }
 
@@ -289,6 +323,11 @@ func TestPromptContractParsesCommonModeEnvelopeVariants(t *testing.T) {
 			name: "same line marker with following lines",
 			raw:  "REPLACE: First line\nSecond line",
 			want: "First line\nSecond line",
+		},
+		{
+			name: "repeated marker",
+			raw:  "REPLACE\nREPLACE\nCorrected text.",
+			want: "Corrected text.",
 		},
 		{
 			name: "legacy XML",
