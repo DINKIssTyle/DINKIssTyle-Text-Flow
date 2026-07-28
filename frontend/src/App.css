@@ -110,7 +110,7 @@ html, body {
     display: block;
     min-height: 100vh;
     background: var(--app-bg-translucent);
-    border-radius: 12px;
+    border-radius: 8px;
     border: 1px solid var(--border);
     box-shadow: 0 10px 30px var(--modal-shadow);
     box-sizing: border-box;
@@ -623,9 +623,21 @@ button:not(:disabled):focus-visible {
 }
 
 .hud-result-actions button + button {
-    border-left: 1px solid var(--border);
+    position: relative;
     border-top-left-radius: 0;
     border-bottom-left-radius: 0;
+}
+
+.hud-result-actions button + button::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 1;
+    width: 1px;
+    background: var(--border);
+    pointer-events: none;
 }
 
 .hud-result-actions button:not(:disabled):hover {
@@ -1865,18 +1877,23 @@ h2 {
 
 .toast {
     position: fixed;
-    right: 20px;
-    bottom: 20px;
+    right: auto;
+    bottom: 52px;
+    left: 50%;
     z-index: 1200;
     display: flex;
     align-items: center;
-    gap: 8px;
-    max-width: 520px;
-    padding: 12px 14px;
+    width: max-content;
+    max-width: min(420px, calc(100vw - 32px));
+    box-sizing: border-box;
+    gap: 6px;
+    padding: 8px 8px 8px 11px;
     border: 1px solid var(--danger-border);
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--danger-bg);
     color: var(--danger);
+    font-size: 12px;
+    line-height: 1.35;
     box-shadow: 0 8px 24px var(--modal-shadow);
     animation: toast-in 0.18s ease-out both;
 }
@@ -1892,14 +1909,64 @@ h2 {
     font-size: 19px;
 }
 
+.toast .toast-message {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.toast button {
+    display: inline-grid;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: currentColor;
+}
+
+.toast button:not(:disabled):hover {
+    border: 0;
+    background: color-mix(in srgb, currentColor 10%, transparent);
+    box-shadow: none;
+}
+
+.toast button .material-symbols-rounded {
+    font-size: 17px;
+    font-variation-settings: "wght" 500;
+}
+
+.toast.hud-error-toast {
+    top: 50%;
+    right: auto;
+    bottom: auto;
+    left: 50%;
+    width: max-content;
+    max-width: min(340px, calc(100vw - 32px));
+    animation: hud-error-toast-in 0.18s ease-out both;
+}
+
 @keyframes toast-in {
     from {
         opacity: 0;
-        transform: translateY(8px);
+        transform: translate(-50%, 8px);
     }
     to {
         opacity: 1;
-        transform: translateY(0);
+        transform: translate(-50%, 0);
+    }
+}
+
+@keyframes hud-error-toast-in {
+    from {
+        opacity: 0;
+        transform: translate(-50%, calc(-50% + 5px));
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%);
     }
 }
 

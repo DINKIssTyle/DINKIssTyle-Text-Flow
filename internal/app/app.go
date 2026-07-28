@@ -461,6 +461,9 @@ func (a *App) SaveGeneralSettings(settings GeneralSettings) (GeneralSettings, er
 		return GeneralSettings{}, err
 	}
 	a.configureGlobalShortcuts()
+	if appInst := application.Get(); appInst != nil {
+		appInst.Event.Emit("general:settings-updated", normalized)
+	}
 	return normalized, nil
 }
 
@@ -493,6 +496,7 @@ func (a *App) SaveApplicationSettings(general GeneralSettings, settings ai.Setti
 
 	a.configureGlobalShortcuts()
 	if appInst := application.Get(); appInst != nil {
+		appInst.Event.Emit("general:settings-updated", normalizedGeneral)
 		appInst.Event.Emit("ai:settings-updated", normalizedAI)
 	}
 	return ApplicationSettings{General: normalizedGeneral, AI: normalizedAI}, nil

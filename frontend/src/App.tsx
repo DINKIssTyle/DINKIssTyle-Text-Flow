@@ -784,6 +784,18 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
     }, [isHUD]);
 
     useEffect(() => {
+        const cancel = Events.On('general:settings-updated', (event) => {
+            if (!isHUD) {
+                return;
+            }
+            const normalized = normalizeGeneralSettings(event.data);
+            savedGeneralSettingsRef.current = normalized;
+            setGeneralSettings(normalized);
+        });
+        return () => cancel();
+    }, [isHUD]);
+
+    useEffect(() => {
         GetTTSModelStatus().then((status) => {
             setModelStatus(status);
         }).catch((err) => console.error(err));
@@ -960,7 +972,7 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         });
         const cancelError = Events.On('ai:screenshot-error', (event) => {
             setAIScreenshotCapturing(false);
-            setError(String(event.data || t('screenCaptureFailed')));
+            setError(localizedAIError(event.data, t('screenCaptureFailed')));
             focusAfterCapture();
         });
         return () => {
@@ -1783,7 +1795,7 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             await BeginScreenRegionCapture();
         } catch (err) {
             setAIScreenshotCapturing(false);
-            setError(String(err));
+            setError(localizedAIError(err, t('screenCaptureFailed')));
         }
     }
 
@@ -1809,6 +1821,24 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
 
     function aiResponseText() {
         return aiReplacement || aiResult;
+    }
+
+    function localizedAIError(err: unknown, fallback?: string) {
+        const message = String(err || '').replace(/^RuntimeError:\s*/i, '').trim();
+        const knownErrors: Array<[string, string]> = [
+            ['Apple Intelligence does not support screenshot input', t('appleIntelligenceScreenshotUnsupported')],
+            ['Apple Intelligence client is required', t('appleIntelligenceClientRequiredError')],
+            ['AI assistant is disabled', t('aiAssistantDisabledError')],
+            ['AI instruction is required', t('aiInstructionRequiredError')],
+            ['screen capture is already active', t('screenCaptureAlreadyActive')],
+            ['no displays are available for screen capture', t('screenCaptureNoDisplays')],
+            ['screen capture region is empty', t('screenCaptureEmptyRegion')],
+            ['screen capture is not active', t('screenCaptureInactive')],
+            ['the selected display is no longer available', t('screenCaptureDisplayUnavailable')],
+            ['screen region capture is not supported on this platform', t('screenCaptureUnsupported')],
+        ];
+        const localized = knownErrors.find(([source]) => message.toLowerCase().includes(source.toLowerCase()));
+        return localized?.[1] || message || fallback || t('screenCaptureFailed');
     }
 
     async function insertAIResponse() {
@@ -1962,7 +1992,7 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             }
         } catch (err) {
             if (requestGeneration === aiRequestGenerationRef.current) {
-                setError(String(err));
+                setError(localizedAIError(err));
             }
         } finally {
             if (requestGeneration === aiRequestGenerationRef.current) {
@@ -2545,7 +2575,11 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                             <button onClick={() => setActiveView('settings')}>{t('settings')}</button>
                         </div>
                         <div className={`ai-context ${aiContext.kind !== 'none' ? 'active' : ''}`}>
-                            <strong>{aiContext.label && aiContext.label !== 'No Context' ? aiContext.label : t('noContext')}</strong>
+                            <strong>
+                                {aiContext.kind === 'selected_text'
+                                    ? t('selectedText')
+                                    : (aiContext.label && aiContext.label !== 'No Context' ? aiContext.label : t('noContext'))}
+                            </strong>
                             <span>
                                 {aiContext.kind === 'selected_text'
                                     ? t('charactersCaptured', { count: aiContext.text.length })
@@ -3179,7 +3213,17 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                 )}
 
                 {error ? (
-                    <div className="toast" role="alert">{error}</div>
+                    <div className={`toast ${windowMode === 'hud' ? 'hud-error-toast' : ''}`} role="alert">
+                        <span className="toast-message">{error}</span>
+                        <button
+                            type="button"
+                            onClick={() => setError('')}
+                            aria-label={t('close')}
+                            title={t('close')}
+                        >
+                            <span className="material-symbols-rounded" aria-hidden="true">close</span>
+                        </button>
+                    </div>
                 ) : saveToast && (
                     <div key={saveToast.id} className="toast success" role="status" aria-live="polite">
                         <span className="material-symbols-rounded" aria-hidden="true">check_circle</span>
