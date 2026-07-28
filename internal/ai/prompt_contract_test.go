@@ -85,6 +85,25 @@ func TestPromptContractSerializesUntrustedContextAsJSON(t *testing.T) {
 	}
 }
 
+func TestPromptContractMarksImageWithoutEmbeddingItsData(t *testing.T) {
+	request := AssistRequest{
+		Instruction:  "Describe this.",
+		ImageDataURL: "data:image/png;base64,c2NyZWVuc2hvdA==",
+	}
+
+	prompt := BuildUserPrompt(request)
+	var payload promptPayload
+	if err := json.Unmarshal([]byte(prompt), &payload); err != nil {
+		t.Fatalf("user prompt is not valid JSON: %v", err)
+	}
+	if !payload.ImageAttached {
+		t.Fatal("user prompt did not mark the attached image")
+	}
+	if strings.Contains(prompt, request.ImageDataURL) {
+		t.Fatal("user prompt embedded the image data URL")
+	}
+}
+
 func TestPromptContractMarksExplicitEditDirectivesForForcedReplacement(t *testing.T) {
 	tests := []struct {
 		instruction string

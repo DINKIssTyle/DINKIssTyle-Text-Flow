@@ -76,6 +76,7 @@ type AssistRequest struct {
 	AppBundleID  string      `json:"appBundleId"`
 	CustomPrompt string      `json:"customPrompt"`
 	CanReplace   bool        `json:"canReplace"`
+	ImageDataURL string      `json:"imageDataUrl,omitempty"`
 }
 
 type AssistResult struct {

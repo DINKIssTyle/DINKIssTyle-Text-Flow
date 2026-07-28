@@ -1,4 +1,4 @@
-import { Children, cloneElement, CSSProperties, FormEvent, isValidElement, KeyboardEvent, ReactElement, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { Children, cloneElement, CSSProperties, FormEvent, isValidElement, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
@@ -9,10 +9,13 @@ import {
     ActivateProcess,
     AssignSnippetLabel,
     BackupSnippetsAndAIPrompts,
+    BeginScreenRegionCapture,
     BrowseAIPromptApp,
     CancelAIRequest,
+    CancelScreenRegionCapture,
     ConfirmLabelDeletion,
     ConfirmSnippetDeletion,
+    CompleteScreenRegionCapture,
     CreateAIPromptProfile,
     CreateLabel,
     CreateSnippet,
@@ -66,8 +69,15 @@ type AIInvocationContext = {
     isEditable?: boolean;
 };
 
+type ScreenCaptureAttachment = {
+    dataUrl: string;
+    mimeType: string;
+    width: number;
+    height: number;
+};
+
 const aiHUDCollapsedHeight = 74;
-const aiHUDMaxHeight = 420;
+const aiHUDMaxHeight = 620;
 const isMacOS = System.IsMac();
 const isWindows = System.IsWindows();
 
@@ -411,8 +421,153 @@ const aboutMarkdownComponents = {
     },
 };
 
+type CapturePoint = { x: number; y: number };
+
+function ScreenCaptureOverlay({ screenID }: { screenID: string }) {
+    const [start, setStart] = useState<CapturePoint | null>(null);
+    const [current, setCurrent] = useState<CapturePoint | null>(null);
+    const [submitting, setSubmitting] = useState(false);
+    const [captureError, setCaptureError] = useState('');
+    const [language, setLanguage] = useState<Language>('en');
+    const t = useMemo(() => createTranslator(language), [language]);
+
+    useEffect(() => {
+        document.documentElement.classList.add('capture-mode');
+        return () => document.documentElement.classList.remove('capture-mode');
+    }, []);
+
+    useEffect(() => {
+        GetGeneralSettings()
+            .then((settings) => setLanguage(normalizeLanguage(settings.language)))
+            .catch(() => {});
+    }, []);
+
+    useEffect(() => {
+        const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+            if (event.key !== 'Escape') {
+                return;
+            }
+            event.preventDefault();
+            CancelScreenRegionCapture().catch(() => {});
+        };
+        window.addEventListener('keydown', handleKeyDown, true);
+        return () => window.removeEventListener('keydown', handleKeyDown, true);
+    }, []);
+
+    const selection = useMemo(() => {
+        if (!start || !current) {
+            return null;
+        }
+        return {
+            x: Math.min(start.x, current.x),
+            y: Math.min(start.y, current.y),
+            width: Math.abs(current.x - start.x),
+            height: Math.abs(current.y - start.y),
+        };
+    }, [current, start]);
+
+    function eventPoint(event: ReactPointerEvent<HTMLDivElement>): CapturePoint {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        return {
+            x: Math.max(0, Math.min(bounds.width, event.clientX - bounds.left)),
+            y: Math.max(0, Math.min(bounds.height, event.clientY - bounds.top)),
+        };
+    }
+
+    function beginSelection(event: ReactPointerEvent<HTMLDivElement>) {
+        if (event.button !== 0 || submitting) {
+            return;
+        }
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const point = eventPoint(event);
+        setCaptureError('');
+        setStart(point);
+        setCurrent(point);
+    }
+
+    function updateSelection(event: ReactPointerEvent<HTMLDivElement>) {
+        if (!start || submitting) {
+            return;
+        }
+        setCurrent(eventPoint(event));
+    }
+
+    async function finishSelection(event: ReactPointerEvent<HTMLDivElement>) {
+        if (!start || submitting) {
+            return;
+        }
+        const point = eventPoint(event);
+        const nextSelection = {
+            x: Math.min(start.x, point.x),
+            y: Math.min(start.y, point.y),
+            width: Math.abs(point.x - start.x),
+            height: Math.abs(point.y - start.y),
+        };
+        if (nextSelection.width <= 3 || nextSelection.height <= 3) {
+            setStart(null);
+            setCurrent(null);
+            return;
+        }
+        setCurrent(point);
+        setSubmitting(true);
+        try {
+            await CompleteScreenRegionCapture({
+                screenId: screenID,
+                ...nextSelection,
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+            });
+        } catch (err) {
+            setCaptureError(String(err));
+            setSubmitting(false);
+        }
+    }
+
+    return (
+        <div
+            className={`screen-capture-overlay ${start ? 'is-selecting' : ''}`}
+            onPointerDown={beginSelection}
+            onPointerMove={updateSelection}
+            onPointerUp={finishSelection}
+            onContextMenu={(event) => {
+                event.preventDefault();
+                CancelScreenRegionCapture().catch(() => {});
+            }}
+        >
+            <div className="screen-capture-hint">
+                <span className="material-symbols-rounded" aria-hidden="true">screenshot_region</span>
+                <span>{submitting ? t('capturingScreenshot') : t('screenCaptureHint')}</span>
+            </div>
+            {selection && (
+                <div
+                    className="screen-capture-selection"
+                    style={{
+                        left: selection.x,
+                        top: selection.y,
+                        width: selection.width,
+                        height: selection.height,
+                    }}
+                >
+                    {selection.width > 90 && selection.height > 48 && (
+                        <span>{Math.round(selection.width)} × {Math.round(selection.height)}</span>
+                    )}
+                </div>
+            )}
+            {captureError && <div className="screen-capture-error" role="alert">{captureError}</div>}
+        </div>
+    );
+}
+
 function App() {
-    const isHUD = useMemo(() => new URLSearchParams(window.location.search).get('mode') === 'hud', []);
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode');
+    if (mode === 'capture') {
+        return <ScreenCaptureOverlay screenID={params.get('screenId') || ''} />;
+    }
+    return <MainApp isHUD={mode === 'hud'} />;
+}
+
+function MainApp({ isHUD }: { isHUD: boolean }) {
     const [activeView, setActiveView] = useState<'snippets' | 'dashboard' | 'aiPrompts' | 'ai' | 'settings' | 'about'>(isHUD ? 'ai' : 'snippets');
     const [windowMode, setWindowMode] = useState<'main' | 'hud'>(isHUD ? 'hud' : 'main');
     const [snippets, setSnippets] = useState<Snippet[]>([]);
@@ -468,6 +623,8 @@ function App() {
     const [aiPrompt, setAIPrompt] = useState('');
     const [aiResult, setAIResult] = useState('');
     const [aiReplacement, setAIReplacement] = useState('');
+    const [aiScreenshot, setAIScreenshot] = useState<ScreenCaptureAttachment | null>(null);
+    const [aiScreenshotCapturing, setAIScreenshotCapturing] = useState(false);
     const [aiRunning, setAIRunning] = useState(false);
     const [aiElapsedMs, setAIElapsedMs] = useState(0);
     const [aiResponseAction, setAIResponseAction] = useState<'idle' | 'copying' | 'copied' | 'inserting'>('idle');
@@ -488,6 +645,7 @@ function App() {
     });
     const aiPromptRef = useRef<HTMLTextAreaElement | null>(null);
     const aiHUDHeightRef = useRef(aiHUDCollapsedHeight);
+    const aiHUDGrowUpRef = useRef(false);
     const aiHUDMeasureFrameRef = useRef<number | null>(null);
     const aiResponseActionTimerRef = useRef<number | null>(null);
     const aiFocusGenerationRef = useRef(0);
@@ -775,6 +933,47 @@ function App() {
         if (!isHUD) {
             return;
         }
+        const focusAfterCapture = () => {
+            const focusGeneration = ++aiFocusGenerationRef.current;
+            window.setTimeout(() => {
+                focusAIPromptInput(focusGeneration);
+                resizeAIHUD();
+            }, 0);
+        };
+        const cancelCaptured = Events.On('ai:screenshot-captured', (event) => {
+            const attachment = event.data as ScreenCaptureAttachment;
+            if (!attachment?.dataUrl) {
+                setAIScreenshotCapturing(false);
+                setError(t('screenCaptureInvalid'));
+                focusAfterCapture();
+                return;
+            }
+            aiHUDGrowUpRef.current = true;
+            setAIScreenshot(attachment);
+            setAIScreenshotCapturing(false);
+            setError('');
+            focusAfterCapture();
+        });
+        const cancelCanceled = Events.On('ai:screenshot-canceled', () => {
+            setAIScreenshotCapturing(false);
+            focusAfterCapture();
+        });
+        const cancelError = Events.On('ai:screenshot-error', (event) => {
+            setAIScreenshotCapturing(false);
+            setError(String(event.data || t('screenCaptureFailed')));
+            focusAfterCapture();
+        });
+        return () => {
+            cancelCaptured();
+            cancelCanceled();
+            cancelError();
+        };
+    }, [isHUD, t]);
+
+    useEffect(() => {
+        if (!isHUD) {
+            return;
+        }
         const stopAITTS = () => {
             aiTTSGenerationRef.current += 1;
             setAITTSSynthesizing(false);
@@ -805,7 +1004,7 @@ function App() {
 
     useEffect(() => {
         resizeAIHUD();
-    }, [aiResult, aiReplacement, aiRunning, windowMode, aiElapsedMs]);
+    }, [aiResult, aiReplacement, aiRunning, aiScreenshot, aiScreenshotCapturing, windowMode, aiElapsedMs]);
 
     useEffect(() => {
         return () => {
@@ -1087,9 +1286,12 @@ function App() {
             aiResponseActionTimerRef.current = null;
         }
         aiHUDHeightRef.current = aiHUDCollapsedHeight;
+        aiHUDGrowUpRef.current = false;
         setAIPrompt('');
         setAIResult('');
         setAIReplacement('');
+        setAIScreenshot(null);
+        setAIScreenshotCapturing(false);
         setAIElapsedMs(0);
         setAIResponseAction('idle');
         setAITTSSynthesizing(false);
@@ -1560,13 +1762,34 @@ function App() {
                 return;
             }
             aiHUDHeightRef.current = nextHeight;
-            ResizeAIPromptWindow(nextHeight).catch((err) => setError(String(err)));
+            const growUp = aiHUDGrowUpRef.current;
+            aiHUDGrowUpRef.current = false;
+            ResizeAIPromptWindow(nextHeight, growUp).catch((err) => setError(String(err)));
         });
     }
 
     function updateAIPrompt(value: string) {
         setAIPrompt(value);
         window.requestAnimationFrame(resizeAIPrompt);
+    }
+
+    async function captureScreenshot() {
+        if (aiScreenshotCapturing || aiRunning) {
+            return;
+        }
+        setAIScreenshotCapturing(true);
+        setError('');
+        try {
+            await BeginScreenRegionCapture();
+        } catch (err) {
+            setAIScreenshotCapturing(false);
+            setError(String(err));
+        }
+    }
+
+    function removeScreenshot() {
+        setAIScreenshot(null);
+        window.requestAnimationFrame(resizeAIHUD);
     }
 
     async function stopAIRequest() {
@@ -1637,8 +1860,9 @@ function App() {
     }
 
     async function runAIPrompt() {
-        const instruction = aiPrompt;
-        if (!instruction.trim() || aiRequestRunningRef.current) {
+        const screenshot = aiScreenshot;
+        const instruction = aiPrompt.trim() || (screenshot ? t('describeScreenshotInstruction') : '');
+        if (!instruction || aiRequestRunningRef.current) {
             return;
         }
         const requestGeneration = aiRequestGenerationRef.current + 1;
@@ -1684,6 +1908,7 @@ function App() {
                 // Selected-text requests still need edit-vs-answer classification when
                 // platform accessibility cannot prove that the source is editable.
                 canReplace: hasSelectedText,
+                imageDataUrl: screenshot?.dataUrl || '',
             });
             if (requestGeneration !== aiRequestGenerationRef.current) {
                 return;
@@ -1911,6 +2136,37 @@ function App() {
             <main className="workspace">
                 {windowMode === 'hud' ? (
                     <section className="ai-hud">
+                        {aiScreenshot && (
+                            <div className="hud-screenshot-preview">
+                                <div
+                                    className="hud-screenshot-image-wrap"
+                                    style={{ aspectRatio: `${aiScreenshot.width} / ${aiScreenshot.height}` }}
+                                >
+                                    <img
+                                        src={aiScreenshot.dataUrl}
+                                        alt={t('attachedScreenshot')}
+                                        draggable={false}
+                                    />
+                                </div>
+                                <div className="hud-screenshot-meta">
+                                    <span>
+                                        {t('screenshotDimensions', {
+                                            width: aiScreenshot.width,
+                                            height: aiScreenshot.height,
+                                        })}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={removeScreenshot}
+                                        disabled={aiRunning}
+                                        aria-label={t('removeScreenshot')}
+                                        title={t('removeScreenshot')}
+                                    >
+                                        <span className="material-symbols-rounded" aria-hidden="true">delete</span>
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                         <form
                             className={`ai-prompt-form hud-prompt-form ${aiRunning ? 'is-running' : ''} ${aiPrompt ? 'has-value' : ''}`}
                             data-hint={aiHUDPromptHint}
@@ -1928,7 +2184,7 @@ function App() {
                             <button
                                 className="hud-inline-send"
                                 type={aiRunning ? 'button' : 'submit'}
-                                disabled={!aiRunning && !aiPrompt.trim()}
+                                disabled={!aiRunning && !aiPrompt.trim() && !aiScreenshot}
                                 onClick={aiRunning ? stopAIRequest : undefined}
                                 aria-label={aiRunning ? t('stop') : t('send')}
                                 title={aiRunning ? t('stop') : t('send')}
@@ -1936,6 +2192,16 @@ function App() {
                                 <span className="material-symbols-rounded" aria-hidden="true">
                                     {aiRunning ? 'stop_circle' : 'arrow_circle_right'}
                                 </span>
+                            </button>
+                            <button
+                                className={`hud-inline-screenshot ${aiScreenshotCapturing ? 'is-capturing' : ''}`}
+                                type="button"
+                                onClick={captureScreenshot}
+                                disabled={aiRunning || aiScreenshotCapturing}
+                                aria-label={aiScreenshotCapturing ? t('capturingScreenshot') : t('captureScreenshot')}
+                                title={aiScreenshotCapturing ? t('capturingScreenshot') : t('captureScreenshot')}
+                            >
+                                <span className="material-symbols-rounded" aria-hidden="true">screenshot_region</span>
                             </button>
                             <button
                                 className="hud-inline-close"

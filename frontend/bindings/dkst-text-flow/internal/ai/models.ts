@@ -16,6 +16,7 @@ export interface AssistRequest {
     "appBundleId": string;
     "customPrompt": string;
     "canReplace": boolean;
+    "imageDataUrl"?: string;
 }
 
 export interface AssistResult {

@@ -2,12 +2,31 @@ package ai
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
 type contractAppleIntelligenceClient struct {
 	instructions string
 	response     string
+}
+
+func TestAppleAssistRejectsScreenshotInput(t *testing.T) {
+	settings := DefaultSettings()
+	settings.Enabled = true
+	settings.Provider = ProviderAppleIntelligence
+
+	_, err := RunAppleIntelligenceAssist(
+		&contractAppleIntelligenceClient{},
+		settings,
+		AssistRequest{
+			Instruction:  "Describe this.",
+			ImageDataURL: "data:image/png;base64,c2NyZWVuc2hvdA==",
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "does not support screenshot") {
+		t.Fatalf("expected screenshot support error, got %v", err)
+	}
 }
 
 func (c *contractAppleIntelligenceClient) Generate(instructions string, _ string) (string, error) {

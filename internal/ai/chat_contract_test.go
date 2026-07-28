@@ -80,6 +80,39 @@ func TestRunAssistUsesStructuredContractForEditableSelection(t *testing.T) {
 	}
 }
 
+func TestRunAssistSendsScreenshotAsMultimodalContent(t *testing.T) {
+	client := &recordingChatClient{response: chatCompletionResponse(t, "Screenshot description")}
+	settings := DefaultSettings()
+	settings.Enabled = true
+	settings.Model = "vision-model"
+	imageDataURL := "data:image/png;base64,c2NyZWVuc2hvdA=="
+
+	result, err := RunAssist(client, settings, AssistRequest{ImageDataURL: imageDataURL})
+	if err != nil {
+		t.Fatalf("RunAssist returned an error: %v", err)
+	}
+	if result.SupportReport != "Screenshot description" {
+		t.Fatalf("unexpected screenshot result: %#v", result)
+	}
+
+	var payload chatRequest
+	if err := json.Unmarshal([]byte(client.body), &payload); err != nil {
+		t.Fatalf("chat request is invalid JSON: %v", err)
+	}
+	parts, ok := payload.Messages[1].Content.([]any)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("user content is not a two-part multimodal request: %#v", payload.Messages[1].Content)
+	}
+	imagePart, ok := parts[1].(map[string]any)
+	if !ok {
+		t.Fatalf("image part has an unexpected shape: %#v", parts[1])
+	}
+	imageURL, ok := imagePart["image_url"].(map[string]any)
+	if !ok || imageURL["url"] != imageDataURL {
+		t.Fatalf("image data URL was not sent: %#v", imagePart)
+	}
+}
+
 func chatCompletionResponse(t *testing.T, content string) string {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{

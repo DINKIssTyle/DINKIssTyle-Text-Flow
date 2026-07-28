@@ -101,6 +101,12 @@ type App struct {
 	globalShortcutMu        sync.Mutex
 	flowStateMu             sync.Mutex
 	flowLifecycleMu         sync.Mutex
+	screenCaptureMu         sync.Mutex
+	screenCaptureContext    context.Context
+	screenCaptureCancel     context.CancelFunc
+	screenCaptureActive     bool
+	screenCaptureCompleting bool
+	screenCaptureWindows    []application.Window
 	flowPaused              bool
 	flowStatusStopper       context.CancelFunc
 	trayManager             *tray.Manager
@@ -148,6 +154,7 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 
 func (a *App) ServiceShutdown() error {
 	appInst := application.Get()
+	a.cancelScreenRegionCapture(false)
 	if a.aiClient != nil {
 		a.aiClient.Cancel()
 	}
@@ -952,18 +959,23 @@ func (a *App) showAIPrompt(sourceProcessID int, requireEnabled bool) {
 	}
 }
 
-// ResizeAIPromptWindow smoothly resizes the AI prompt while keeping its top edge fixed.
-func (a *App) ResizeAIPromptWindow(height int) {
+// ResizeAIPromptWindow smoothly resizes the AI prompt. Screenshot previews keep
+// the bottom edge fixed so the HUD grows upward instead of covering more content below.
+func (a *App) ResizeAIPromptWindow(height int, growUp bool) {
 	const (
 		width     = 460
 		minHeight = 74
-		maxHeight = 420
+		maxHeight = 620
 	)
 	height = max(minHeight, min(maxHeight, height))
 
 	appInst := application.Get()
 	if aiWin, ok := appInst.Window.GetByName("ai"); ok {
 		application.InvokeSync(func() {
+			if growUp {
+				windowing.ResizeFromBottom(aiWin, width, height)
+				return
+			}
 			windowing.ResizeFromTop(aiWin, width, height)
 		})
 	}

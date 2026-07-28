@@ -150,6 +150,38 @@ func TestLMStudioStatefulResponseRequiresResponseID(t *testing.T) {
 	}
 }
 
+func TestLMStudioStatefulChatSendsScreenshotAsImageInput(t *testing.T) {
+	client := &queuedChatClient{responses: []string{
+		lmStudioResponse(t, "Screenshot description", "resp_image"),
+	}}
+	settings := DefaultSettings()
+	settings.Enabled = true
+	settings.Provider = ProviderLMStudio
+	settings.Model = "vision-model"
+	settings.HistoryEnabled = true
+	history := NewConversationHistory()
+	imageDataURL := "data:image/png;base64,c2NyZWVuc2hvdA=="
+
+	if _, err := RunAssistWithHistory(client, settings, AssistRequest{
+		ImageDataURL: imageDataURL,
+	}, history); err != nil {
+		t.Fatalf("RunAssistWithHistory returned an error: %v", err)
+	}
+
+	var payload struct {
+		Input []lmStudioChatInput `json:"input"`
+	}
+	if err := json.Unmarshal([]byte(client.bodies[0]), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Input) != 2 ||
+		payload.Input[0].Type != "text" ||
+		payload.Input[1].Type != "image" ||
+		payload.Input[1].DataURL != imageDataURL {
+		t.Fatalf("unexpected LM Studio multimodal input: %#v", payload.Input)
+	}
+}
+
 func TestLMStudioChatEndpointNormalizesSupportedInputs(t *testing.T) {
 	for _, endpoint := range []string{
 		"localhost:1234",

@@ -291,7 +291,8 @@ button:not(:disabled):focus-visible {
     height: 100%;
     box-sizing: border-box;
     padding: 9px 11px 11px;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
 .ai-hud {
@@ -301,7 +302,7 @@ button:not(:disabled):focus-visible {
 }
 
 .hud-prompt-form {
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
     align-items: center;
     gap: 5px;
     min-height: 52px;
@@ -390,9 +391,157 @@ button:not(:disabled):focus-visible {
     color: var(--muted);
 }
 
+.hud-prompt-form .hud-inline-screenshot {
+    color: var(--muted);
+}
+
+.hud-prompt-form .hud-inline-screenshot.is-capturing {
+    color: var(--primary);
+}
+
 .hud-prompt-form button .material-symbols-rounded {
     font-size: 22px;
     font-variation-settings: "wght" 500;
+}
+
+.hud-screenshot-preview {
+    position: relative;
+    display: grid;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--panel-bg) 88%, transparent);
+    animation: hud-content-in 0.18s ease-out;
+}
+
+.hud-screenshot-image-wrap {
+    width: 100%;
+    max-height: 300px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background: var(--panel-bg);
+}
+
+.hud-screenshot-image-wrap img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-height: 300px;
+    object-fit: contain;
+    -webkit-user-drag: none;
+    user-select: none;
+}
+
+.hud-screenshot-meta {
+    display: flex;
+    min-height: 28px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 5px 2px 10px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.hud-screenshot-meta button {
+    display: inline-grid;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+}
+
+.hud-screenshot-meta button:not(:disabled):hover {
+    border: 0;
+    background: var(--active-bg);
+    box-shadow: none;
+}
+
+.hud-screenshot-meta .material-symbols-rounded {
+    font-size: 18px;
+}
+
+.screen-capture-overlay {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    cursor: crosshair;
+    touch-action: none;
+    user-select: none;
+    background: rgba(7, 12, 20, 0.28);
+}
+
+.screen-capture-overlay.is-selecting {
+    background: rgba(7, 12, 20, 0.42);
+}
+
+.screen-capture-hint,
+.screen-capture-error {
+    position: fixed;
+    z-index: 3;
+    left: 50%;
+    display: flex;
+    max-width: calc(100vw - 40px);
+    align-items: center;
+    gap: 7px;
+    box-sizing: border-box;
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    border-radius: 999px;
+    background: rgba(17, 24, 39, 0.86);
+    color: #fff;
+    font-size: 13px;
+    line-height: 20px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32);
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+.screen-capture-hint {
+    top: 24px;
+}
+
+.screen-capture-hint .material-symbols-rounded {
+    font-size: 20px;
+}
+
+.screen-capture-error {
+    bottom: 24px;
+    border-color: rgba(255, 160, 160, 0.42);
+    background: rgba(118, 24, 24, 0.92);
+}
+
+.screen-capture-selection {
+    position: absolute;
+    z-index: 2;
+    box-sizing: border-box;
+    border: 2px solid #fff;
+    background: transparent;
+    box-shadow:
+        0 0 0 1px rgba(35, 117, 255, 0.95),
+        0 0 0 99999px rgba(5, 10, 18, 0.34);
+    pointer-events: none;
+}
+
+.screen-capture-selection span {
+    position: absolute;
+    right: -1px;
+    bottom: -25px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(17, 24, 39, 0.86);
+    color: #fff;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
 .hud-result {

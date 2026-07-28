@@ -34,6 +34,9 @@ func RunAppleIntelligenceAssist(client AppleIntelligenceClient, settings Setting
 	if !settings.Enabled {
 		return AssistResult{}, errors.New("AI assistant is disabled")
 	}
+	if strings.TrimSpace(request.ImageDataURL) != "" {
+		return AssistResult{}, errors.New("Apple Intelligence does not support screenshot input")
+	}
 	if strings.TrimSpace(request.Instruction) == "" {
 		return AssistResult{}, errors.New("AI instruction is required")
 	}

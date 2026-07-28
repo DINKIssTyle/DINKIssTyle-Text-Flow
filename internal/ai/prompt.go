@@ -86,10 +86,11 @@ type promptContext struct {
 }
 
 type promptPayload struct {
-	Instruction  string         `json:"instruction"`
-	Context      *promptContext `json:"context,omitempty"`
-	AppRules     string         `json:"appRules,omitempty"`
-	RequiredMode string         `json:"requiredMode,omitempty"`
+	Instruction   string         `json:"instruction"`
+	Context       *promptContext `json:"context,omitempty"`
+	AppRules      string         `json:"appRules,omitempty"`
+	RequiredMode  string         `json:"requiredMode,omitempty"`
+	ImageAttached bool           `json:"imageAttached,omitempty"`
 }
 
 type structuredAssistResponse struct {
@@ -112,8 +113,9 @@ func BuildSystemPrompt(canReplace bool) string {
 
 func BuildUserPrompt(request AssistRequest) string {
 	payload := promptPayload{
-		Instruction: request.Instruction,
-		AppRules:    strings.TrimSpace(request.CustomPrompt),
+		Instruction:   request.Instruction,
+		AppRules:      strings.TrimSpace(request.CustomPrompt),
+		ImageAttached: strings.TrimSpace(request.ImageDataURL) != "",
 	}
 	if RequiresForcedReplacement(request) {
 		payload.RequiredMode = "FORCE_REPLACE"

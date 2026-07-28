@@ -18,7 +18,18 @@ type chatRequest struct {
 
 type chatMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
+}
+
+type openAIChatContentPart struct {
+	Type     string              `json:"type"`
+	Text     string              `json:"text,omitempty"`
+	ImageURL *openAIChatImageURL `json:"image_url,omitempty"`
+}
+
+type openAIChatImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type chatResponse struct {
@@ -47,8 +58,15 @@ func RunAssistWithHistory(
 	if strings.TrimSpace(settings.Model) == "" {
 		return AssistResult{}, errors.New("AI model is required")
 	}
-	if strings.TrimSpace(request.Instruction) == "" {
+	request.Instruction = strings.TrimSpace(request.Instruction)
+	if request.Instruction == "" && strings.TrimSpace(request.ImageDataURL) != "" {
+		request.Instruction = "Describe this screenshot."
+	}
+	if request.Instruction == "" {
 		return AssistResult{}, errors.New("AI instruction is required")
+	}
+	if request.ImageDataURL != "" && !isSupportedImageDataURL(request.ImageDataURL) {
+		return AssistResult{}, errors.New("screen capture image data is invalid")
 	}
 	if client == nil {
 		return AssistResult{}, errors.New("AI client is required")
@@ -85,7 +103,20 @@ func runOpenAICompatibleAssist(
 	if history != nil {
 		messages = append(messages, history.openAIMessagesLocked(settings.HistoryCount)...)
 	}
-	messages = append(messages, chatMessage{Role: "user", Content: userPrompt})
+	userContent := any(userPrompt)
+	if request.ImageDataURL != "" {
+		userContent = []openAIChatContentPart{
+			{Type: "text", Text: userPrompt},
+			{
+				Type: "image_url",
+				ImageURL: &openAIChatImageURL{
+					URL:    request.ImageDataURL,
+					Detail: "auto",
+				},
+			},
+		}
+	}
+	messages = append(messages, chatMessage{Role: "user", Content: userContent})
 
 	payload := chatRequest{
 		Model:    settings.Model,
@@ -124,11 +155,17 @@ func runOpenAICompatibleAssist(
 
 type lmStudioChatRequest struct {
 	Model              string   `json:"model"`
-	Input              string   `json:"input"`
+	Input              any      `json:"input"`
 	SystemPrompt       string   `json:"system_prompt"`
 	Temperature        *float64 `json:"temperature,omitempty"`
 	Store              bool     `json:"store"`
 	PreviousResponseID string   `json:"previous_response_id,omitempty"`
+}
+
+type lmStudioChatInput struct {
+	Type    string `json:"type"`
+	Content string `json:"content,omitempty"`
+	DataURL string `json:"data_url,omitempty"`
 }
 
 type lmStudioChatResponse struct {
@@ -145,9 +182,17 @@ func runLMStudioStatefulAssist(
 	request AssistRequest,
 	history *ConversationHistory,
 ) (AssistResult, error) {
+	userPrompt := BuildUserPrompt(request)
+	input := any(userPrompt)
+	if request.ImageDataURL != "" {
+		input = []lmStudioChatInput{
+			{Type: "text", Content: userPrompt},
+			{Type: "image", DataURL: request.ImageDataURL},
+		}
+	}
 	payload := lmStudioChatRequest{
 		Model:              settings.Model,
-		Input:              BuildUserPrompt(request),
+		Input:              input,
 		SystemPrompt:       BuildSystemPrompt(CanReplaceSelectedText(request)),
 		Store:              true,
 		PreviousResponseID: history.prepareLMStudioTurnLocked(settings.HistoryCount),
@@ -183,6 +228,19 @@ func runLMStudioStatefulAssist(
 	}
 	history.commitLMStudioTurnLocked(responseID)
 	return ParseAssistResultForRequest(content, request), nil
+}
+
+func isSupportedImageDataURL(value string) bool {
+	for _, prefix := range []string{
+		"data:image/png;base64,",
+		"data:image/jpeg;base64,",
+		"data:image/webp;base64,",
+	} {
+		if strings.HasPrefix(value, prefix) && len(value) > len(prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func ExtractChatContent(responseText string) (string, error) {

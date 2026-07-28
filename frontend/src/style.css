@@ -3,6 +3,13 @@ html {
     color: #17202c;
 }
 
+html.capture-mode,
+html.capture-mode body,
+html.capture-mode #root {
+    background: transparent;
+    overflow: hidden;
+}
+
 body {
     margin: 0;
     color: #17202c;
