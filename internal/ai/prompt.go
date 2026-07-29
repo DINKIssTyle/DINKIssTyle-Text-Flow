@@ -22,7 +22,6 @@ var answerOnlySystemPromptLines = []string{
 	"Multimodal Handling: If imageAttached is true and instruction is empty, describe the image; otherwise answer using the image context.",
 	"Read-Only Context: Provide clear answers, explanations, or summaries without wrappers.",
 	"Preserve code, Markdown, HTML, syntax, delimiters, whitespace, and formatting when relevant.",
-	"Apply appRules as lower-priority guidance; user instruction takes precedence.",
 	"Return only the answer, with no wrapper.",
 }
 
@@ -46,7 +45,6 @@ var editableSelectionSystemPromptLines = []string{
 	"ANSWER language: use instruction's language unless requested; foreign-language selection, context, document, or history never changes it.",
 	"REPLACE language: use requested target; translation uses its target; otherwise preserve the selected content's language.",
 	"Preserve syntax, delimiters, whitespace, formatting, and code fences unless task changes them.",
-	"Apply appRules as lower-priority guidance.",
 	`Return exactly one valid JSON object with this schema: {"mode":"FORCE_REPLACE|REPLACE|ANSWER","content":"completed content"}.`,
 	"Encode line breaks and special characters in content as valid JSON.",
 	"Content must contain only completed content; never repeat FORCE_REPLACE, REPLACE, or ANSWER inside content.",
@@ -90,7 +88,6 @@ type promptContext struct {
 type promptPayload struct {
 	Instruction   string         `json:"instruction"`
 	Context       *promptContext `json:"context,omitempty"`
-	AppRules      string         `json:"appRules,omitempty"`
 	RequiredMode  string         `json:"requiredMode,omitempty"`
 	ImageAttached bool           `json:"imageAttached,omitempty"`
 }
@@ -113,10 +110,26 @@ func BuildSystemPrompt(canReplace bool) string {
 	return strings.Join(answerOnlySystemPromptLines, "\n")
 }
 
+func BuildSystemPromptForRequest(request AssistRequest) string {
+	basePrompt := BuildSystemPrompt(CanReplaceSelectedText(request))
+	customPrompt := strings.TrimSpace(request.CustomPrompt)
+	if customPrompt == "" {
+		return basePrompt
+	}
+
+	return strings.Join([]string{
+		"HIGHEST-PRIORITY USER-CONFIGURED RULES:",
+		customPrompt,
+		"Apply these rules before the current instruction and conversation history whenever they conflict.",
+		"Mandatory response formats, routing labels, and context-safety constraints below still apply.",
+		"",
+		basePrompt,
+	}, "\n")
+}
+
 func BuildUserPrompt(request AssistRequest) string {
 	payload := promptPayload{
 		Instruction:   request.Instruction,
-		AppRules:      strings.TrimSpace(request.CustomPrompt),
 		ImageAttached: strings.TrimSpace(request.ImageDataURL) != "",
 	}
 	if RequiresForcedReplacement(request) {

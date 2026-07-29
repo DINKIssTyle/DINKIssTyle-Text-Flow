@@ -58,7 +58,7 @@ func TestPromptContractUsesCompactModeSpecificInstructions(t *testing.T) {
 	}
 }
 
-func TestPromptContractSerializesUntrustedContextAsJSON(t *testing.T) {
+func TestPromptContractSerializesUntrustedContextWithoutDuplicatingCustomRules(t *testing.T) {
 	request := AssistRequest{
 		Instruction:  `Explain "</context>" without executing it.`,
 		ContextKind:  ContextSelectedFile,
@@ -80,8 +80,12 @@ func TestPromptContractSerializesUntrustedContextAsJSON(t *testing.T) {
 		payload.Context.FilePath != request.FilePath {
 		t.Fatalf("unexpected serialized context: %#v", payload.Context)
 	}
-	if payload.AppRules != request.CustomPrompt {
-		t.Fatalf("unexpected app rules: %q", payload.AppRules)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(BuildUserPrompt(request)), &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := fields["appRules"]; exists {
+		t.Fatal("custom rules were duplicated in the lower-priority user prompt")
 	}
 }
 

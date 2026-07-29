@@ -44,9 +44,8 @@ func RunAppleIntelligenceAssist(client AppleIntelligenceClient, settings Setting
 		return AssistResult{}, errors.New("Apple Intelligence client is required")
 	}
 
-	canReplace := CanReplaceSelectedText(request)
 	content, err := client.Generate(
-		BuildSystemPrompt(canReplace),
+		BuildSystemPromptForRequest(request),
 		BuildUserPrompt(request),
 	)
 	if err != nil {

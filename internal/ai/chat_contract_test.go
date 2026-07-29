@@ -2,6 +2,7 @@ package ai
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -77,6 +78,36 @@ func TestRunAssistUsesStructuredContractForEditableSelection(t *testing.T) {
 	}
 	if payload.Messages[0].Content != BuildSystemPrompt(true) {
 		t.Fatal("chat request did not use the editable-selection system prompt")
+	}
+}
+
+func TestRunAssistPlacesCustomRulesInTheHighestPrioritySystemPrompt(t *testing.T) {
+	client := &recordingChatClient{response: chatCompletionResponse(t, "Concise answer")}
+	settings := DefaultSettings()
+	settings.Enabled = true
+	settings.Model = "test-model"
+	request := AssistRequest{
+		Instruction:  "Explain this.",
+		CustomPrompt: "Always answer concisely.",
+	}
+
+	if _, err := RunAssist(client, settings, request); err != nil {
+		t.Fatalf("RunAssist returned an error: %v", err)
+	}
+
+	var payload chatRequest
+	if err := json.Unmarshal([]byte(client.body), &payload); err != nil {
+		t.Fatalf("chat request is invalid JSON: %v", err)
+	}
+	if payload.Messages[0].Content != BuildSystemPromptForRequest(request) {
+		t.Fatal("chat request did not elevate custom rules into the system prompt")
+	}
+	userPrompt, ok := payload.Messages[1].Content.(string)
+	if !ok {
+		t.Fatalf("user prompt has an unexpected type: %T", payload.Messages[1].Content)
+	}
+	if strings.Contains(userPrompt, request.CustomPrompt) {
+		t.Fatal("chat request duplicated custom rules in the user message")
 	}
 }
 

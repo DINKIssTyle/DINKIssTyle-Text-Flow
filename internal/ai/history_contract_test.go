@@ -219,6 +219,54 @@ func TestLMStudioHistoryStartsNewChainWhenSystemPromptChanges(t *testing.T) {
 	}
 }
 
+func TestLMStudioHistoryStartsNewChainWhenCustomRulesChange(t *testing.T) {
+	client := &queuedChatClient{responses: []string{
+		lmStudioResponse(t, "first answer", "resp_first"),
+		lmStudioResponse(t, "second answer", "resp_second"),
+		lmStudioResponse(t, "third answer", "resp_third"),
+	}}
+	settings := DefaultSettings()
+	settings.Enabled = true
+	settings.Provider = ProviderLMStudio
+	settings.Model = "local-model"
+	settings.HistoryEnabled = true
+	settings.HistoryCount = 10
+	history := NewConversationHistory()
+
+	requests := []AssistRequest{
+		{Instruction: "first", CustomPrompt: "Use rule A."},
+		{Instruction: "second", CustomPrompt: "Use rule B."},
+		{Instruction: "third", CustomPrompt: "Use rule B."},
+	}
+	for _, request := range requests {
+		if _, err := RunAssistWithHistory(client, settings, request, history); err != nil {
+			t.Fatalf("RunAssistWithHistory returned an error: %v", err)
+		}
+	}
+
+	var first, second, third lmStudioChatRequest
+	for index, target := range []*lmStudioChatRequest{&first, &second, &third} {
+		if err := json.Unmarshal([]byte(client.bodies[index]), target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if first.SystemPrompt != BuildSystemPromptForRequest(requests[0]) {
+		t.Fatal("first request did not include its custom rules")
+	}
+	if second.PreviousResponseID != "" {
+		t.Fatalf("changed custom rules continued the old chain: %q", second.PreviousResponseID)
+	}
+	if second.SystemPrompt != BuildSystemPromptForRequest(requests[1]) {
+		t.Fatal("new chain did not include the changed custom rules")
+	}
+	if third.PreviousResponseID != "resp_second" {
+		t.Fatalf("unchanged custom rules did not continue the new chain: %q", third.PreviousResponseID)
+	}
+	if third.SystemPrompt != "" {
+		t.Fatal("continued request unexpectedly repeated the system prompt")
+	}
+}
+
 func TestLMStudioStatefulResponseRequiresResponseID(t *testing.T) {
 	response := lmStudioResponse(t, "ANSWER\nhello", "")
 	if _, _, err := ExtractLMStudioChatContent(response); err == nil ||

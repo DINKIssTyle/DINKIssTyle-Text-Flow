@@ -95,10 +95,9 @@ func runOpenAICompatibleAssist(
 	request AssistRequest,
 	history *ConversationHistory,
 ) (AssistResult, error) {
-	canReplace := CanReplaceSelectedText(request)
 	userPrompt := BuildUserPrompt(request)
 	messages := []chatMessage{
-		{Role: "system", Content: BuildSystemPrompt(canReplace)},
+		{Role: "system", Content: BuildSystemPromptForRequest(request)},
 	}
 	if history != nil {
 		messages = append(messages, history.openAIMessagesLocked(settings.HistoryCount)...)
@@ -190,7 +189,7 @@ func runLMStudioStatefulAssist(
 			{Type: "image", DataURL: request.ImageDataURL},
 		}
 	}
-	systemPrompt := BuildSystemPrompt(CanReplaceSelectedText(request))
+	systemPrompt := BuildSystemPromptForRequest(request)
 	previousResponseID := history.prepareLMStudioTurnLocked(
 		settings.HistoryCount,
 		systemPrompt,
