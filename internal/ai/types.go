@@ -36,16 +36,17 @@ type Settings struct {
 	PasteReplacementBundleIDs []string `json:"pasteReplacementBundleIds"`
 
 	// TTS Settings
-	TTSEnabled       bool    `json:"ttsEnabled"`
-	TTSEngine        string  `json:"ttsEngine"`        // "os" or "supertonic3"
-	TTSEndpoint      string  `json:"ttsEndpoint"`      // e.g., "http://localhost:7788"
-	TTSVoice         string  `json:"ttsVoice"`         // e.g., "default" or "M1", "F1", etc.
-	TTSOSVoice       string  `json:"ttsOsVoice"`       // OS-specific persistent voice identifier
-	TTSUseAIResponse bool    `json:"ttsUseAiResponse"` // Speak on AI response
-	TTSUseShortcut   bool    `json:"ttsUseShortcut"`   // Speak on shortcut hotkey
-	TTSShortcut      string  `json:"ttsShortcut"`      // Hotkey for TTS reading
-	TTSSpeed         float64 `json:"ttsSpeed"`         // Speech speed factor (0.7 - 2.0)
-	TTSSteps         int     `json:"ttsSteps"`         // Number of denoising steps (5 - 12)
+	TTSEnabled          bool    `json:"ttsEnabled"`
+	TTSEngine           string  `json:"ttsEngine"`           // "os" or "supertonic3"
+	TTSEndpoint         string  `json:"ttsEndpoint"`         // e.g., "http://localhost:7788"
+	TTSVoice            string  `json:"ttsVoice"`            // e.g., "default" or "M1", "F1", etc.
+	TTSOSVoice          string  `json:"ttsOsVoice"`          // OS-specific persistent voice identifier
+	TTSUseAIResponse    bool    `json:"ttsUseAiResponse"`    // Speak on AI response
+	TTSUseShortcut      bool    `json:"ttsUseShortcut"`      // Speak on shortcut hotkey
+	TTSShortcut         string  `json:"ttsShortcut"`         // Hotkey for TTS reading
+	TTSShowAudioActions bool    `json:"ttsShowAudioActions"` // Show replay/save controls for synthesized audio
+	TTSSpeed            float64 `json:"ttsSpeed"`            // Speech speed factor (0.7 - 2.0)
+	TTSSteps            int     `json:"ttsSteps"`            // Number of denoising steps (5 - 12)
 }
 
 type ContextKind string
@@ -105,16 +106,17 @@ func DefaultSettings() Settings {
 		PasteReplacementBundleIDs: pasteReplacementBundleIDs,
 
 		// TTS Defaults
-		TTSEnabled:       false,
-		TTSEngine:        "os",
-		TTSEndpoint:      "http://localhost:7788",
-		TTSVoice:         "M1",
-		TTSOSVoice:       "",
-		TTSUseAIResponse: false,
-		TTSUseShortcut:   false,
-		TTSShortcut:      "",
-		TTSSpeed:         1.05,
-		TTSSteps:         8,
+		TTSEnabled:          false,
+		TTSEngine:           "os",
+		TTSEndpoint:         "http://localhost:7788",
+		TTSVoice:            "M1",
+		TTSOSVoice:          "",
+		TTSUseAIResponse:    false,
+		TTSUseShortcut:      false,
+		TTSShortcut:         "",
+		TTSShowAudioActions: true,
+		TTSSpeed:            1.05,
+		TTSSteps:            8,
 	}
 }
 

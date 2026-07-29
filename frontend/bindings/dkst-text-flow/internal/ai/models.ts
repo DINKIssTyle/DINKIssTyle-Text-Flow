@@ -93,6 +93,11 @@ export interface Settings {
     "ttsShortcut": string;
 
     /**
+     * Show replay/save controls for synthesized audio
+     */
+    "ttsShowAudioActions": boolean;
+
+    /**
      * Speech speed factor (0.7 - 2.0)
      */
     "ttsSpeed": number;

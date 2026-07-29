@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	ort "github.com/yalue/onnxruntime_go"
 	"golang.org/x/text/unicode/norm"
@@ -1215,7 +1216,7 @@ func chunkText(text string, maxLen int) []string {
 			continue
 		}
 
-		if len(para) <= maxLen {
+		if utf8.RuneCountInString(para) <= maxLen {
 			chunks = append(chunks, para)
 			continue
 		}
@@ -1230,7 +1231,7 @@ func chunkText(text string, maxLen int) []string {
 				continue
 			}
 
-			sentenceLen := len(sentence)
+			sentenceLen := utf8.RuneCountInString(sentence)
 			if sentenceLen > maxLen {
 				if current.Len() > 0 {
 					chunks = append(chunks, strings.TrimSpace(current.String()))
@@ -1245,14 +1246,20 @@ func chunkText(text string, maxLen int) []string {
 						continue
 					}
 
-					partLen := len(part)
+					partLen := utf8.RuneCountInString(part)
 					if partLen > maxLen {
+						if current.Len() > 0 {
+							chunks = append(chunks, strings.TrimSpace(current.String()))
+							current.Reset()
+							currentLen = 0
+						}
+
 						words := strings.Fields(part)
 						var wordChunk strings.Builder
 						wordChunkLen := 0
 
 						for _, word := range words {
-							wordLen := len(word)
+							wordLen := utf8.RuneCountInString(word)
 							if wordChunkLen+wordLen+1 > maxLen && wordChunk.Len() > 0 {
 								chunks = append(chunks, strings.TrimSpace(wordChunk.String()))
 								wordChunk.Reset()

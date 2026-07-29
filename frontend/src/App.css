@@ -617,6 +617,11 @@ button:not(:disabled):focus-visible {
     background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
 }
 
+.hud-tts-actions {
+    margin-right: auto;
+    margin-left: 0;
+}
+
 .hud-result-actions button {
     display: inline-flex;
     height: 24px;

@@ -291,6 +291,26 @@ func TestPromptContractParsesJSONResponse(t *testing.T) {
 	}
 }
 
+func TestPromptContractRepairsRedundantJSONClosingBrace(t *testing.T) {
+	content := "If you say the president's re-election is impossible, that's enough, right?\n\n" +
+		"It's because you guys are the ones who try to break that system!!"
+	raw, err := json.Marshal(structuredAssistResponse{
+		Mode:    "REPLACE",
+		Content: content,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, '}')
+
+	result := ParseAssistResult(string(raw), true)
+	if result.Intent != IntentEdit ||
+		result.Replacement != content ||
+		result.SupportReport != "" {
+		t.Fatalf("redundant closing brace leaked routing JSON: %#v", result)
+	}
+}
+
 func TestPromptContractStripsRepeatedModeFromJSONContent(t *testing.T) {
 	raw, err := json.Marshal(structuredAssistResponse{
 		Mode:    "replace",

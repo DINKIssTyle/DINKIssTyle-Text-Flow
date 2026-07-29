@@ -214,22 +214,8 @@ func parseAssistResult(rawText string, canReplace bool) (AssistResult, bool) {
 	}
 
 	candidate := stripJSONEnvelopeFence(source)
-	var response structuredAssistResponse
-	if err := json.Unmarshal([]byte(candidate), &response); err == nil {
-		if normalizeResponseMode(response.Mode) != "" {
-			return parsedAssistResult(response.Mode, response.Content, canReplace), true
-		}
-
-		var legacy legacyAssistResponse
-		if err := json.Unmarshal([]byte(candidate), &legacy); err == nil {
-			legacyMode := normalizeResponseMode(legacy.Intent)
-			if legacyMode == "replace" || legacyMode == "force_replace" {
-				return parsedAssistResult(legacyMode, legacy.Replacement, canReplace), true
-			}
-			if legacyMode == "answer" {
-				return parsedAssistResult("answer", legacy.SupportReport, canReplace), true
-			}
-		}
+	if mode, content, ok := parseJSONEnvelope(candidate); ok {
+		return parsedAssistResult(mode, content, canReplace), true
 	}
 
 	if mode, content, ok := parseLegacyXMLEnvelope(source); ok {
@@ -240,6 +226,43 @@ func parseAssistResult(rawText string, canReplace bool) (AssistResult, bool) {
 		Intent:        IntentQuestion,
 		SupportReport: source,
 	}, false
+}
+
+func parseJSONEnvelope(candidate string) (string, string, bool) {
+	// Small local models occasionally append an extra closing brace to an
+	// otherwise complete routing object. Recover only that narrow case so
+	// arbitrary malformed output can never become an automatic replacement.
+	for redundantClosers := 0; redundantClosers <= 3; redundantClosers++ {
+		if mode, content, ok := unmarshalJSONEnvelope(candidate); ok {
+			return mode, content, true
+		}
+		if !strings.HasSuffix(candidate, "}") {
+			break
+		}
+		candidate = strings.TrimSpace(strings.TrimSuffix(candidate, "}"))
+	}
+	return "", "", false
+}
+
+func unmarshalJSONEnvelope(candidate string) (string, string, bool) {
+	var response structuredAssistResponse
+	if err := json.Unmarshal([]byte(candidate), &response); err == nil {
+		if normalizeResponseMode(response.Mode) != "" {
+			return response.Mode, response.Content, true
+		}
+
+		var legacy legacyAssistResponse
+		if err := json.Unmarshal([]byte(candidate), &legacy); err == nil {
+			legacyMode := normalizeResponseMode(legacy.Intent)
+			if legacyMode == "replace" || legacyMode == "force_replace" {
+				return legacyMode, legacy.Replacement, true
+			}
+			if legacyMode == "answer" {
+				return "answer", legacy.SupportReport, true
+			}
+		}
+	}
+	return "", "", false
 }
 
 func parsedAssistResult(mode string, content string, canReplace bool) AssistResult {

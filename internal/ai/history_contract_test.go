@@ -32,6 +32,9 @@ func TestDefaultSettingsUseTenHistoryTurns(t *testing.T) {
 	if settings.HistoryCount != 10 {
 		t.Fatalf("unexpected default history count: %d", settings.HistoryCount)
 	}
+	if !settings.TTSShowAudioActions {
+		t.Fatal("synthesized audio actions must be visible by default")
+	}
 
 	settings.HistoryCount = 0
 	if normalized := NormalizeSettings(settings); normalized.HistoryCount != 10 {

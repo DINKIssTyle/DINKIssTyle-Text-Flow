@@ -39,9 +39,11 @@ import {
     ListRunningApps,
     RequestAccessibilityPermission,
     RequestScreenRecordingPermission,
+    ReplayLastTTSAudio,
     ReplaceSelectedText,
     ResizeAIPromptWindow,
     RunAIAssist,
+    SaveLastTTSAudio,
     SaveApplicationSettings,
     SaveCommonAIPromptRule,
     Speak,
@@ -670,6 +672,8 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
     const [aiElapsedMs, setAIElapsedMs] = useState(0);
     const [aiResponseAction, setAIResponseAction] = useState<'idle' | 'copying' | 'copied' | 'inserting'>('idle');
     const [aiTTSSynthesizing, setAITTSSynthesizing] = useState(false);
+    const [aiTTSAudioReady, setAITTSAudioReady] = useState(false);
+    const [aiTTSAudioAction, setAITTSAudioAction] = useState<'idle' | 'replaying' | 'saving' | 'saved'>('idle');
     const [recordingHotkey, setRecordingHotkey] = useState(false);
     const [recordingTtsHotkey, setRecordingTtsHotkey] = useState(false);
     const [recordingFlowToggleHotkey, setRecordingFlowToggleHotkey] = useState(false);
@@ -689,6 +693,7 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
     const aiHUDGrowUpRef = useRef(false);
     const aiHUDMeasureFrameRef = useRef<number | null>(null);
     const aiResponseActionTimerRef = useRef<number | null>(null);
+    const aiTTSAudioActionTimerRef = useRef<number | null>(null);
     const aiFocusGenerationRef = useRef(0);
     // Invalidates callbacks from requests that belonged to a closed or replaced HUD session.
     const aiRequestGenerationRef = useRef(0);
@@ -1087,7 +1092,7 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
 
     useEffect(() => {
         resizeAIHUD();
-    }, [aiResult, aiReplacement, aiRunning, aiScreenshot, aiScreenshotCapturing, windowMode, aiElapsedMs]);
+    }, [aiResult, aiReplacement, aiRunning, aiScreenshot, aiScreenshotCapturing, windowMode, aiElapsedMs, aiTTSSynthesizing, aiTTSAudioReady]);
 
     useEffect(() => {
         return () => {
@@ -1097,6 +1102,9 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             }
             if (aiResponseActionTimerRef.current !== null) {
                 window.clearTimeout(aiResponseActionTimerRef.current);
+            }
+            if (aiTTSAudioActionTimerRef.current !== null) {
+                window.clearTimeout(aiTTSAudioActionTimerRef.current);
             }
         };
     }, []);
@@ -1383,6 +1391,10 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             window.clearTimeout(aiResponseActionTimerRef.current);
             aiResponseActionTimerRef.current = null;
         }
+        if (aiTTSAudioActionTimerRef.current !== null) {
+            window.clearTimeout(aiTTSAudioActionTimerRef.current);
+            aiTTSAudioActionTimerRef.current = null;
+        }
         aiHUDHeightRef.current = aiHUDCollapsedHeight;
         aiHUDGrowUpRef.current = false;
         setAIPrompt('');
@@ -1393,6 +1405,8 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         setAIElapsedMs(0);
         setAIResponseAction('idle');
         setAITTSSynthesizing(false);
+        setAITTSAudioReady(false);
+        setAITTSAudioAction('idle');
         setAIRunning(false);
         setAIContext({
             kind: 'none',
@@ -1584,6 +1598,7 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             ttsUseAiResponse: !!settings?.ttsUseAiResponse,
             ttsUseShortcut: !!settings?.ttsUseShortcut,
             ttsShortcut: settings?.ttsShortcut || '',
+            ttsShowAudioActions: settings?.ttsShowAudioActions ?? true,
             ttsSpeed: settings?.ttsSpeed || 1.05,
             ttsSteps: settings?.ttsSteps || 8,
         } as any;
@@ -2101,6 +2116,56 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         }
     }
 
+    async function replayAITTSAudio() {
+        if (!aiTTSAudioReady || aiTTSAudioAction === 'replaying' || aiTTSAudioAction === 'saving') {
+            return;
+        }
+        const ttsGeneration = aiTTSGenerationRef.current;
+        setAITTSAudioAction('replaying');
+        setError('');
+        try {
+            await ReplayLastTTSAudio();
+        } catch (err) {
+            if (ttsGeneration === aiTTSGenerationRef.current) {
+                setError(String(err));
+            }
+        } finally {
+            if (ttsGeneration === aiTTSGenerationRef.current) {
+                setAITTSAudioAction('idle');
+            }
+        }
+    }
+
+    async function saveAITTSAudio() {
+        if (!aiTTSAudioReady || aiTTSAudioAction === 'replaying' || aiTTSAudioAction === 'saving') {
+            return;
+        }
+        const ttsGeneration = aiTTSGenerationRef.current;
+        setAITTSAudioAction('saving');
+        setError('');
+        try {
+            const saved = await SaveLastTTSAudio(language);
+            if (ttsGeneration !== aiTTSGenerationRef.current) {
+                return;
+            }
+            setAITTSAudioAction(saved ? 'saved' : 'idle');
+            if (saved) {
+                if (aiTTSAudioActionTimerRef.current !== null) {
+                    window.clearTimeout(aiTTSAudioActionTimerRef.current);
+                }
+                aiTTSAudioActionTimerRef.current = window.setTimeout(() => {
+                    setAITTSAudioAction('idle');
+                    aiTTSAudioActionTimerRef.current = null;
+                }, 1400);
+            }
+        } catch (err) {
+            if (ttsGeneration === aiTTSGenerationRef.current) {
+                setAITTSAudioAction('idle');
+                setError(String(err));
+            }
+        }
+    }
+
     async function runAIPrompt() {
         const screenshot = aiScreenshot;
         const instruction = aiPrompt.trim() || (screenshot ? t('describeScreenshotInstruction') : '');
@@ -2116,6 +2181,8 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         setAIResponseAction('idle');
         aiTTSGenerationRef.current += 1;
         setAITTSSynthesizing(false);
+        setAITTSAudioReady(false);
+        setAITTSAudioAction('idle');
         setError('');
         setAIResult('');
         setAIReplacement('');
@@ -2189,6 +2256,14 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                     aiTTSGenerationRef.current = ttsGeneration;
                     setAITTSSynthesizing(true);
                     Speak(textToSpeak)
+                        .then(() => {
+                            if (
+                                ttsGeneration === aiTTSGenerationRef.current &&
+                                requestSettings?.ttsEngine === 'supertonic3'
+                            ) {
+                                setAITTSAudioReady(true);
+                            }
+                        })
                         .catch((err) => {
                             if (ttsGeneration === aiTTSGenerationRef.current) {
                                 setError(String(err));
@@ -2466,6 +2541,32 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                                         <div className="hud-tts-status" role="status" aria-live="polite">
                                             <span className="hud-tts-spinner" aria-hidden="true" />
                                             <span>{t('ttsSynthesizing')}</span>
+                                        </div>
+                                    )}
+                                    {!aiTTSSynthesizing &&
+                                        aiTTSAudioReady &&
+                                        aiSettings?.ttsShowAudioActions !== false && (
+                                        <div className="hud-result-actions hud-tts-actions" role="group" aria-label={t('audioActions')}>
+                                            <button
+                                                type="button"
+                                                onClick={replayAITTSAudio}
+                                                disabled={aiTTSAudioAction === 'replaying' || aiTTSAudioAction === 'saving'}
+                                                title={t('replayAudioTitle')}
+                                            >
+                                                <span className="material-symbols-rounded" aria-hidden="true">replay</span>
+                                                <span>{t('replayAudio')}</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={saveAITTSAudio}
+                                                disabled={aiTTSAudioAction === 'replaying' || aiTTSAudioAction === 'saving'}
+                                                title={t('saveAudioTitle')}
+                                            >
+                                                <span className="material-symbols-rounded" aria-hidden="true">
+                                                    {aiTTSAudioAction === 'saved' ? 'check' : 'download'}
+                                                </span>
+                                                <span>{aiTTSAudioAction === 'saved' ? t('audioSaved') : t('saveAudio')}</span>
+                                            </button>
                                         </div>
                                     )}
                                     <div className="hud-result-actions" role="group" aria-label={t('responseActions')}>
@@ -3247,6 +3348,16 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                                                 // @ts-ignore
                                                 onChange={(event) => setAISettings({ ...aiSettings, ttsUseShortcut: event.target.checked })}
                                             /> {t('ttsUseShortcut')}
+                                        </label>
+                                        <label>
+                                            <input
+                                                type="checkbox"
+                                                checked={aiSettings.ttsShowAudioActions !== false}
+                                                onChange={(event) => setAISettings({
+                                                    ...aiSettings,
+                                                    ttsShowAudioActions: event.target.checked,
+                                                })}
+                                            /> {t('ttsShowAudioActions')}
                                         </label>
                                     </div>
 

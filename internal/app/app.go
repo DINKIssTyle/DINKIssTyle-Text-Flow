@@ -96,6 +96,8 @@ type App struct {
 	ttsActiveID             uint64
 	ttsMu                   sync.Mutex
 	ttsSynthesisMu          sync.Mutex
+	ttsAudioMu              sync.RWMutex
+	lastTTSAudio            []byte
 	aiSettingsMu            sync.Mutex
 	settingsSaveMu          sync.Mutex
 	globalShortcutMu        sync.Mutex
@@ -178,6 +180,7 @@ func (a *App) ServiceShutdown() error {
 		a.supertonicEngine = nil
 	}
 	a.supertonicEngineMu.Unlock()
+	a.clearLastTTSAudio()
 
 	if a.store == nil {
 		return nil
@@ -1047,6 +1050,7 @@ func (a *App) speakWithSettings(text string, settings ai.Settings, requireEnable
 	if requireEnabled && !settings.TTSEnabled {
 		return errors.New("TTS is disabled in settings")
 	}
+	a.clearLastTTSAudio()
 
 	ctx, speechID := a.beginSpeaking()
 	playbackStarted := false
@@ -1153,27 +1157,17 @@ func (a *App) speakWithSettings(text string, settings ai.Settings, requireEnable
 			_ = os.Remove(tempFilePath)
 			return fmt.Errorf("failed to write WAV data: %w", err)
 		}
-		if err := ctx.Err(); err != nil {
-			_ = os.Remove(tempFilePath)
-			return err
-		}
-
-		cmd, err := speech.StartAudioPlayback(tempFilePath)
+		wavFileData, err := os.ReadFile(tempFilePath)
 		if err != nil {
 			_ = os.Remove(tempFilePath)
+			return fmt.Errorf("failed to retain synthesized speech: %w", err)
+		}
+		a.setLastTTSAudio(wavFileData)
+		if err := a.startTemporaryTTSAudioPlayback(ctx, speechID, tempFilePath); err != nil {
+			a.clearLastTTSAudio()
 			return err
 		}
-		if !a.attachSpeakingCommand(speechID, cmd) {
-			stopSpeakingCommand(cmd)
-			_ = os.Remove(tempFilePath)
-			return context.Canceled
-		}
 		playbackStarted = true
-		go func(id uint64, cmd *exec.Cmd, filePath string) {
-			_ = cmd.Wait()
-			_ = os.Remove(filePath)
-			a.finishSpeaking(id, cmd)
-		}(speechID, cmd, tempFilePath)
 
 	default:
 		return fmt.Errorf("unknown TTS engine: %s", settings.TTSEngine)
