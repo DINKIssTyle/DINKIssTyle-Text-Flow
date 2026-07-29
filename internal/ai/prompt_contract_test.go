@@ -410,3 +410,12 @@ func TestPromptContractParsesJSONWithTrailingCharacters(t *testing.T) {
 		t.Fatalf("failed to parse JSON envelope with trailing characters: %#v", result)
 	}
 }
+
+func TestPromptContractParsesJSONWithoutModeField(t *testing.T) {
+	raw := "```json\n{\n  \"content\": \"애플의 여정은 정말 대단했어요!\"\n}\n```"
+	result := ParseAssistResult(raw, false)
+
+	if result.Intent != IntentQuestion || result.SupportReport != "애플의 여정은 정말 대단했어요!" {
+		t.Fatalf("failed to parse JSON envelope without mode field: %#v", result)
+	}
+}

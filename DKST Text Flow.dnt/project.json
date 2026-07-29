@@ -26,6 +26,8 @@
     "conclusionAction" : "none",
     "conclusionText" : "DKST Text Flow was installed successfully.",
     "identifier" : "com.dinkisstyle.textflow.installer",
+    "includePostinstallScript" : false,
+    "includePreinstallScript" : false,
     "installLocation" : "\/Applications",
     "installationDomain" : "localSystem",
     "licenseText" : "",

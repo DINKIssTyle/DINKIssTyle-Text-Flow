@@ -94,8 +94,16 @@ type promptPayload struct {
 }
 
 type structuredAssistResponse struct {
-	Mode    string `json:"mode"`
-	Content string `json:"content"`
+	Mode          string `json:"mode"`
+	Content       string `json:"content"`
+	Intent        string `json:"intent"`
+	Replacement   string `json:"replacement"`
+	SupportReport string `json:"supportReport"`
+	Answer        string `json:"answer"`
+	Response      string `json:"response"`
+	Result        string `json:"result"`
+	Text          string `json:"text"`
+	Output        string `json:"output"`
 }
 
 type legacyAssistResponse struct {
@@ -273,23 +281,51 @@ func parseJSONEnvelope(candidate string) (string, string, bool) {
 
 func unmarshalJSONEnvelope(candidate string) (string, string, bool) {
 	var response structuredAssistResponse
-	if err := json.Unmarshal([]byte(candidate), &response); err == nil {
-		if normalizeResponseMode(response.Mode) != "" {
-			return response.Mode, response.Content, true
-		}
+	if err := json.Unmarshal([]byte(candidate), &response); err != nil {
+		return "", "", false
+	}
 
-		var legacy legacyAssistResponse
-		if err := json.Unmarshal([]byte(candidate), &legacy); err == nil {
-			legacyMode := normalizeResponseMode(legacy.Intent)
-			if legacyMode == "replace" || legacyMode == "force_replace" {
-				return legacyMode, legacy.Replacement, true
-			}
-			if legacyMode == "answer" {
-				return "answer", legacy.SupportReport, true
-			}
+	mode := normalizeResponseMode(response.Mode)
+	if mode == "" {
+		mode = normalizeResponseMode(response.Intent)
+	}
+
+	content := response.Content
+	if content == "" {
+		content = response.Replacement
+	}
+	if content == "" {
+		content = response.SupportReport
+	}
+	if content == "" {
+		content = response.Answer
+	}
+	if content == "" {
+		content = response.Response
+	}
+	if content == "" {
+		content = response.Result
+	}
+	if content == "" {
+		content = response.Text
+	}
+	if content == "" {
+		content = response.Output
+	}
+
+	if strings.TrimSpace(content) == "" {
+		return "", "", false
+	}
+
+	if mode == "" {
+		if response.Replacement != "" {
+			mode = "replace"
+		} else {
+			mode = "answer"
 		}
 	}
-	return "", "", false
+
+	return mode, content, true
 }
 
 func parsedAssistResult(mode string, content string, canReplace bool) AssistResult {
