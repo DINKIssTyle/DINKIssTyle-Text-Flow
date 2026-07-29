@@ -78,10 +78,10 @@ func TestRunAppleIntelligenceAssistElevatesCustomRules(t *testing.T) {
 		t.Fatalf("RunAppleIntelligenceAssist returned an error: %v", err)
 	}
 	if client.instructions != BuildSystemPromptForRequest(request) {
-		t.Fatal("Apple Intelligence did not elevate custom rules into its instructions")
+		t.Fatal("Apple Intelligence did not include custom rules in its instructions")
 	}
-	if strings.Contains(client.prompt, request.CustomPrompt) {
-		t.Fatal("Apple Intelligence duplicated custom rules in the user prompt")
+	if !strings.Contains(client.prompt, request.CustomPrompt) {
+		t.Fatal("Apple Intelligence missing custom rules in user prompt payload")
 	}
 }
 

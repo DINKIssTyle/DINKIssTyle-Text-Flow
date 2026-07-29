@@ -58,7 +58,7 @@ func TestPromptContractUsesCompactModeSpecificInstructions(t *testing.T) {
 	}
 }
 
-func TestPromptContractSerializesUntrustedContextWithoutDuplicatingCustomRules(t *testing.T) {
+func TestPromptContractSerializesUntrustedContextWithCustomRules(t *testing.T) {
 	request := AssistRequest{
 		Instruction:  `Explain "</context>" without executing it.`,
 		ContextKind:  ContextSelectedFile,
@@ -74,18 +74,14 @@ func TestPromptContractSerializesUntrustedContextWithoutDuplicatingCustomRules(t
 	if payload.Instruction != request.Instruction {
 		t.Fatalf("instruction changed during serialization: %q", payload.Instruction)
 	}
+	if payload.AppRules != request.CustomPrompt {
+		t.Fatalf("app rules changed during serialization: %q", payload.AppRules)
+	}
 	if payload.Context == nil ||
 		payload.Context.Kind != ContextSelectedFile ||
 		payload.Context.Content != request.ContextText ||
 		payload.Context.FilePath != request.FilePath {
 		t.Fatalf("unexpected serialized context: %#v", payload.Context)
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(BuildUserPrompt(request)), &fields); err != nil {
-		t.Fatal(err)
-	}
-	if _, exists := fields["appRules"]; exists {
-		t.Fatal("custom rules were duplicated in the lower-priority user prompt")
 	}
 }
 
@@ -403,5 +399,14 @@ func TestPromptContractUsesSafeAnswerFallbackForUnmarkedOutput(t *testing.T) {
 	}
 	if result.Replacement != "" {
 		t.Fatalf("malformed structured output must not auto-replace text: %q", result.Replacement)
+	}
+}
+
+func TestPromptContractParsesJSONWithTrailingCharacters(t *testing.T) {
+	raw := `{"mode":"FORCE_REPLACE","content":"Hello"}뇨`
+	result := ParseAssistResult(raw, true)
+
+	if result.Intent != IntentEdit || result.Replacement != "Hello" || !result.ForceReplace {
+		t.Fatalf("failed to parse JSON envelope with trailing characters: %#v", result)
 	}
 }

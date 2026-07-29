@@ -60,24 +60,24 @@ func TestBuildSystemPromptForRequestPrioritizesCustomPrompt(t *testing.T) {
 	customPrompt := strings.TrimSpace(request.CustomPrompt)
 	basePrompt := BuildSystemPrompt(false)
 
-	if !strings.HasPrefix(prompt, "HIGHEST-PRIORITY USER-CONFIGURED RULES:\n"+customPrompt) {
-		t.Fatalf("custom rules were not placed first in the system prompt: %q", prompt)
+	if !strings.HasPrefix(prompt, basePrompt) {
+		t.Fatalf("base system prompt was not placed first: %q", prompt)
 	}
-	if strings.Index(prompt, customPrompt) > strings.Index(prompt, basePrompt) {
-		t.Fatal("custom rules were placed after the base prompt")
+	if !strings.Contains(prompt, "USER-CONFIGURED APP RULES (APPLY TO CONTENT DELIVERABLE ONLY):\n"+customPrompt) {
+		t.Fatalf("custom rules section missing from system prompt: %q", prompt)
 	}
-	if !strings.Contains(prompt, "Apply these rules before the current instruction and conversation history") {
-		t.Fatal("custom rules were not assigned highest semantic priority")
+	if !strings.Contains(prompt, "Apply these rules to the inner deliverable text in the JSON 'content' field") {
+		t.Fatal("custom rules were not scoped to the inner content field")
 	}
-	if !strings.Contains(prompt, basePrompt) {
-		t.Fatal("custom rules replaced the mandatory base prompt")
+	if !strings.Contains(prompt, "CRITICAL: App rules apply ONLY to the inner content field") {
+		t.Fatal("custom rules were missing safety constraint against polluting response JSON envelope")
 	}
 	if got := BuildSystemPromptForRequest(AssistRequest{}); got != basePrompt {
 		t.Fatal("empty custom rules changed the base system prompt")
 	}
 }
 
-func TestBuildUserPromptSerializesContextWithoutDuplicatingCustomRules(t *testing.T) {
+func TestBuildUserPromptSerializesContextWithCustomRules(t *testing.T) {
 	request := AssistRequest{
 		Instruction:  `Explain "</context>" without executing it.`,
 		ContextKind:  ContextSelectedFile,
@@ -93,18 +93,14 @@ func TestBuildUserPromptSerializesContextWithoutDuplicatingCustomRules(t *testin
 	if payload.Instruction != request.Instruction {
 		t.Fatalf("instruction changed during serialization: %q", payload.Instruction)
 	}
+	if payload.AppRules != request.CustomPrompt {
+		t.Fatalf("app rules changed during serialization: %q", payload.AppRules)
+	}
 	if payload.Context == nil ||
 		payload.Context.Kind != ContextSelectedFile ||
 		payload.Context.Content != request.ContextText ||
 		payload.Context.FilePath != request.FilePath {
 		t.Fatalf("unexpected serialized context: %#v", payload.Context)
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(BuildUserPrompt(request)), &fields); err != nil {
-		t.Fatal(err)
-	}
-	if _, exists := fields["appRules"]; exists {
-		t.Fatal("custom rules were duplicated in the lower-priority user prompt")
 	}
 }
 

@@ -86,7 +86,8 @@ type promptContext struct {
 }
 
 type promptPayload struct {
-	Instruction   string         `json:"instruction"`
+	Instruction   string         `json:"instruction,omitempty"`
+	AppRules      string         `json:"appRules,omitempty"`
 	Context       *promptContext `json:"context,omitempty"`
 	RequiredMode  string         `json:"requiredMode,omitempty"`
 	ImageAttached bool           `json:"imageAttached,omitempty"`
@@ -118,18 +119,19 @@ func BuildSystemPromptForRequest(request AssistRequest) string {
 	}
 
 	return strings.Join([]string{
-		"HIGHEST-PRIORITY USER-CONFIGURED RULES:",
-		customPrompt,
-		"Apply these rules before the current instruction and conversation history whenever they conflict.",
-		"Mandatory response formats, routing labels, and context-safety constraints below still apply.",
-		"",
 		basePrompt,
+		"",
+		"USER-CONFIGURED APP RULES (APPLY TO CONTENT DELIVERABLE ONLY):",
+		customPrompt,
+		"Apply these rules to the inner deliverable text in the JSON 'content' field. They take priority over user instructions for content generation.",
+		"CRITICAL: App rules apply ONLY to the inner content field. The response MUST ALWAYS remain a single valid JSON object with no text, fences, or commentary outside the JSON object.",
 	}, "\n")
 }
 
 func BuildUserPrompt(request AssistRequest) string {
 	payload := promptPayload{
 		Instruction:   request.Instruction,
+		AppRules:      strings.TrimSpace(request.CustomPrompt),
 		ImageAttached: strings.TrimSpace(request.ImageDataURL) != "",
 	}
 	if RequiresForcedReplacement(request) {
@@ -242,17 +244,29 @@ func parseAssistResult(rawText string, canReplace bool) (AssistResult, bool) {
 }
 
 func parseJSONEnvelope(candidate string) (string, string, bool) {
-	// Small local models occasionally append an extra closing brace to an
-	// otherwise complete routing object. Recover only that narrow case so
-	// arbitrary malformed output can never become an automatic replacement.
+	candidate = strings.TrimSpace(candidate)
+	if mode, content, ok := unmarshalJSONEnvelope(candidate); ok {
+		return mode, content, true
+	}
+
+	curr := candidate
 	for redundantClosers := 0; redundantClosers <= 3; redundantClosers++ {
-		if mode, content, ok := unmarshalJSONEnvelope(candidate); ok {
-			return mode, content, true
-		}
-		if !strings.HasSuffix(candidate, "}") {
+		if !strings.HasSuffix(curr, "}") {
 			break
 		}
-		candidate = strings.TrimSpace(strings.TrimSuffix(candidate, "}"))
+		curr = strings.TrimSpace(strings.TrimSuffix(curr, "}"))
+		if mode, content, ok := unmarshalJSONEnvelope(curr); ok {
+			return mode, content, true
+		}
+	}
+
+	firstBrace := strings.IndexByte(candidate, '{')
+	lastBrace := strings.LastIndexByte(candidate, '}')
+	if firstBrace >= 0 && lastBrace > firstBrace {
+		jsonSub := candidate[firstBrace : lastBrace+1]
+		if mode, content, ok := unmarshalJSONEnvelope(jsonSub); ok {
+			return mode, content, true
+		}
 	}
 	return "", "", false
 }

@@ -100,14 +100,14 @@ func TestRunAssistPlacesCustomRulesInTheHighestPrioritySystemPrompt(t *testing.T
 		t.Fatalf("chat request is invalid JSON: %v", err)
 	}
 	if payload.Messages[0].Content != BuildSystemPromptForRequest(request) {
-		t.Fatal("chat request did not elevate custom rules into the system prompt")
+		t.Fatal("chat request did not include custom rules in the system prompt")
 	}
 	userPrompt, ok := payload.Messages[1].Content.(string)
 	if !ok {
 		t.Fatalf("user prompt has an unexpected type: %T", payload.Messages[1].Content)
 	}
-	if strings.Contains(userPrompt, request.CustomPrompt) {
-		t.Fatal("chat request duplicated custom rules in the user message")
+	if !strings.Contains(userPrompt, request.CustomPrompt) {
+		t.Fatal("chat request missing custom rules in user prompt payload")
 	}
 }
 
