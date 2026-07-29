@@ -3664,7 +3664,9 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                                             {app.iconDataUrl ? (
                                                 <img src={app.iconDataUrl} alt="" />
                                             ) : (
-                                                <span className="material-symbols-rounded running-app-fallback-icon" aria-hidden="true">application_mac</span>
+                                                <span className="running-app-fallback-icon" aria-hidden="true">
+                                                    {(app.name || app.bundleId || '?').trim().charAt(0).toUpperCase()}
+                                                </span>
                                             )}
                                             <span className="running-app-details">
                                                 <strong>{app.name}</strong>

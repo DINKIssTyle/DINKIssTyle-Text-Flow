@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	winapi "golang.org/x/sys/windows"
 )
 
 const (
@@ -189,7 +191,14 @@ func appInfoFromProcess(processID int) AppInfo {
 	}
 	path := processPath(processID)
 	if path == "" {
-		return AppInfo{}
+		name := processNameFromSnapshot(processID)
+		if name == "" {
+			return AppInfo{}
+		}
+		return AppInfo{
+			Name:     strings.TrimSuffix(name, filepath.Ext(name)),
+			BundleID: strings.ToLower(name),
+		}
 	}
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	return AppInfo{
@@ -273,6 +282,33 @@ func processPath(processID int) string {
 		return ""
 	}
 	return syscall.UTF16ToString(buffer[:size])
+}
+
+// processNameFromSnapshot keeps app-specific matching available when Windows
+// denies full path access, which can happen across integrity levels (for
+// example, when the focused app is running as administrator).
+func processNameFromSnapshot(processID int) string {
+	if processID <= 0 {
+		return ""
+	}
+	snapshot, err := winapi.CreateToolhelp32Snapshot(winapi.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return ""
+	}
+	defer winapi.CloseHandle(snapshot)
+
+	entry := winapi.ProcessEntry32{Size: uint32(unsafe.Sizeof(winapi.ProcessEntry32{}))}
+	if err := winapi.Process32First(snapshot, &entry); err != nil {
+		return ""
+	}
+	for {
+		if entry.ProcessID == uint32(processID) {
+			return syscall.UTF16ToString(entry.ExeFile[:])
+		}
+		if err := winapi.Process32Next(snapshot, &entry); err != nil {
+			return ""
+		}
+	}
 }
 
 func sendCtrlKey(key uintptr) {

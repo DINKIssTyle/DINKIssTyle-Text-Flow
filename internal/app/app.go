@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -602,14 +603,27 @@ func (a *App) DeleteAIPromptProfile(id string) (AIPromptSettings, error) {
 
 func (a *App) BrowseAIPromptApp() (platform.AppInfo, error) {
 	appInst := application.Get()
-	path, err := appInst.Dialog.OpenFile().
+	dialog := appInst.Dialog.OpenFile().
 		SetTitle("Choose an application").
-		SetDirectory("/Applications").
-		PromptForSingleSelection()
+		CanChooseFiles(true).
+		CanChooseDirectories(false)
+	switch runtime.GOOS {
+	case "darwin":
+		dialog.SetDirectory("/Applications")
+	case "windows":
+		if programFiles := strings.TrimSpace(os.Getenv("ProgramFiles")); programFiles != "" {
+			dialog.SetDirectory(programFiles)
+		}
+		dialog.
+			AddFilter("Windows applications (*.exe)", "*.exe;*.EXE").
+			AllowsOtherFileTypes(false)
+	}
+
+	path, err := dialog.PromptForSingleSelection()
 	if err != nil {
 		return platform.AppInfo{}, err
 	}
-	path = enclosingAppBundlePath(path)
+	path = normalizeAIPromptAppPath(path, runtime.GOOS)
 	if path == "" {
 		return platform.AppInfo{}, nil
 	}
@@ -637,6 +651,21 @@ func enclosingAppBundlePath(path string) string {
 		path = next
 	}
 	return ""
+}
+
+func normalizeAIPromptAppPath(path, goos string) string {
+	path = strings.TrimSpace(path)
+	switch goos {
+	case "darwin":
+		return enclosingAppBundlePath(path)
+	case "windows":
+		if !strings.EqualFold(filepath.Ext(path), ".exe") {
+			return ""
+		}
+		return filepath.Clean(path)
+	default:
+		return path
+	}
 }
 
 func (a *App) GetAISettings() (ai.Settings, error) {
@@ -1294,13 +1323,40 @@ func (a *App) aiPromptRuleForBundleID(bundleID string) AIPromptRule {
 	if err != nil {
 		return DefaultAIPromptSettings().Common
 	}
-	bundleID = strings.TrimSpace(bundleID)
 	for _, profile := range settings.Profiles {
-		if strings.TrimSpace(profile.AppBundleID) != "" && profile.AppBundleID == bundleID {
+		if appIdentifiersMatch(profile.AppBundleID, bundleID) {
 			return profile.AIPromptRule
 		}
 	}
 	return settings.Common
+}
+
+func appIdentifiersMatch(configured, active string) bool {
+	configured = strings.TrimSpace(configured)
+	active = strings.TrimSpace(active)
+	if configured == "" || active == "" {
+		return false
+	}
+	if strings.EqualFold(configured, active) {
+		return true
+	}
+
+	// Windows profiles historically stored only an executable name. Accept a
+	// manually entered full executable path without weakening matching between
+	// two distinct full paths.
+	configuredHasPath := strings.ContainsAny(configured, `/\`)
+	activeHasPath := strings.ContainsAny(active, `/\`)
+	if configuredHasPath == activeHasPath {
+		return false
+	}
+	return strings.EqualFold(appIdentifierBase(configured), appIdentifierBase(active))
+}
+
+func appIdentifierBase(value string) string {
+	if separator := strings.LastIndexAny(value, `/\`); separator >= 0 {
+		return value[separator+1:]
+	}
+	return value
 }
 
 func DefaultGeneralSettings() GeneralSettings {

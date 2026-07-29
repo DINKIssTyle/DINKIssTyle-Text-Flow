@@ -118,3 +118,39 @@ func TestCustomPromptForRequestHonorsContextEnableFlags(t *testing.T) {
 		t.Fatalf("disabled no-selection rule was applied: %q", got)
 	}
 }
+
+func TestCustomPromptForRequestMatchesWindowsExecutableCaseInsensitively(t *testing.T) {
+	store, err := storage.Open(filepath.Join(t.TempDir(), "ai-prompt-windows.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	app := &App{store: store}
+	if _, err := app.saveAIPromptSettings(AIPromptSettings{
+		Common: AIPromptRule{
+			UseSelectedText:    true,
+			SelectedTextPrompt: "common rule",
+		},
+		Profiles: []AIPromptProfile{{
+			ID:          "notepad",
+			AppName:     "Notepad",
+			AppBundleID: "Notepad.EXE",
+			AIPromptRule: AIPromptRule{
+				UseSelectedText:    true,
+				SelectedTextPrompt: "notepad rule",
+			},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	request := ai.AssistRequest{
+		AppBundleID: `C:\Windows\System32\notepad.exe`,
+		ContextKind: ai.ContextSelectedText,
+		ContextText: "selected",
+	}
+	if got := app.customPromptForRequest(request); got != "notepad rule" {
+		t.Fatalf("customPromptForRequest() = %q, want notepad rule", got)
+	}
+}

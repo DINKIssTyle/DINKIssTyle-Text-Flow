@@ -17,7 +17,8 @@ type conversationTurn struct {
 type ConversationHistory struct {
 	mu sync.Mutex
 
-	signature string
+	signature    string
+	requestScope string
 
 	openAITurns []conversationTurn
 
@@ -47,8 +48,25 @@ func (history *ConversationHistory) prepareLocked(settings Settings) {
 	}
 }
 
+// prepareRequestLocked prevents app-specific instructions and answers from one
+// application from being replayed as conversation history in another
+// application. The custom prompt is part of the scope because an app may use
+// different rules for selected-text and no-selection requests.
+func (history *ConversationHistory) prepareRequestLocked(request AssistRequest) {
+	scope := conversationRequestScope(request)
+	if history.requestScope != "" && history.requestScope != scope {
+		history.resetTurnsLocked()
+	}
+	history.requestScope = scope
+}
+
 func (history *ConversationHistory) resetLocked() {
 	history.signature = ""
+	history.requestScope = ""
+	history.resetTurnsLocked()
+}
+
+func (history *ConversationHistory) resetTurnsLocked() {
 	history.openAITurns = nil
 	history.lmStudioResponseID = ""
 	history.lmStudioSystemPrompt = ""
@@ -109,5 +127,16 @@ func conversationSignature(settings Settings) string {
 		strings.TrimSpace(settings.Endpoint),
 		strings.TrimSpace(settings.Model),
 		strconv.Itoa(settings.HistoryCount),
+	}, "\x00")
+}
+
+func conversationRequestScope(request AssistRequest) string {
+	appID := strings.ToLower(strings.TrimSpace(request.AppBundleID))
+	if appID == "" {
+		appID = strings.ToLower(strings.TrimSpace(request.AppName))
+	}
+	return strings.Join([]string{
+		appID,
+		strings.TrimSpace(request.CustomPrompt),
 	}, "\x00")
 }

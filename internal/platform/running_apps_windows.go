@@ -14,6 +14,7 @@ type runningWindowsProcess struct {
 	ID          int    `json:"Id"`
 	ProcessName string `json:"ProcessName"`
 	Path        string `json:"Path"`
+	IconDataURL string `json:"IconDataUrl"`
 }
 
 func listRunningApps() []AppInfo {
@@ -22,15 +23,15 @@ func listRunningApps() []AppInfo {
 		"-NoProfile",
 		"-NonInteractive",
 		"-Command",
-		"@(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object Id, ProcessName, Path) | ConvertTo-Json -Compress",
+		windowsRunningAppsPowerShell,
 	))
 	output, err := command.Output()
 	if err != nil {
 		return []AppInfo{}
 	}
 
-	var processes []runningWindowsProcess
-	if err := json.Unmarshal(output, &processes); err != nil {
+	processes, err := decodeRunningWindowsProcesses(output)
+	if err != nil {
 		return []AppInfo{}
 	}
 
@@ -43,6 +44,9 @@ func listRunningApps() []AppInfo {
 		}
 		if info.Path == "" {
 			info.Path = strings.TrimSpace(process.Path)
+		}
+		if info.IconDataURL == "" {
+			info.IconDataURL = strings.TrimSpace(process.IconDataURL)
 		}
 		if info.BundleID == "" && info.Name != "" {
 			info.BundleID = strings.ToLower(info.Name + ".exe")
@@ -62,3 +66,59 @@ func listRunningApps() []AppInfo {
 	})
 	return apps
 }
+
+func decodeRunningWindowsProcesses(output []byte) ([]runningWindowsProcess, error) {
+	output = []byte(strings.TrimSpace(string(output)))
+	if len(output) == 0 || string(output) == "null" {
+		return []runningWindowsProcess{}, nil
+	}
+	if output[0] == '[' {
+		var processes []runningWindowsProcess
+		if err := json.Unmarshal(output, &processes); err != nil {
+			return nil, err
+		}
+		return processes, nil
+	}
+	var process runningWindowsProcess
+	if err := json.Unmarshal(output, &process); err != nil {
+		return nil, err
+	}
+	return []runningWindowsProcess{process}, nil
+}
+
+const windowsRunningAppsPowerShell = `
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Drawing
+@(
+    Get-Process |
+        Where-Object { $_.MainWindowHandle -ne 0 } |
+        ForEach-Object {
+            $processPath = $_.Path
+            $iconDataUrl = ''
+            if ($processPath) {
+                try {
+                    $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($processPath)
+                    if ($null -ne $icon) {
+                        $bitmap = $icon.ToBitmap()
+                        $stream = New-Object System.IO.MemoryStream
+                        try {
+                            $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+                            $iconDataUrl = 'data:image/png;base64,' +
+                                [Convert]::ToBase64String($stream.ToArray())
+                        } finally {
+                            $stream.Dispose()
+                            $bitmap.Dispose()
+                            $icon.Dispose()
+                        }
+                    }
+                } catch {}
+            }
+            [PSCustomObject]@{
+                Id = $_.Id
+                ProcessName = $_.ProcessName
+                Path = $processPath
+                IconDataUrl = $iconDataUrl
+            }
+        }
+) | ConvertTo-Json -Compress
+`

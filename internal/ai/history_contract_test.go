@@ -95,6 +95,57 @@ func TestOpenAIHistoryReplaysOnlyRecentTurns(t *testing.T) {
 	}
 }
 
+func TestOpenAIHistoryDoesNotCrossApplicationBoundaries(t *testing.T) {
+	client := &queuedChatClient{responses: []string{
+		chatCompletionResponse(t, "ANSWER\nnotepad answer"),
+		chatCompletionResponse(t, "ANSWER\nbrowser answer"),
+		chatCompletionResponse(t, "ANSWER\nbrowser follow-up"),
+	}}
+	settings := DefaultSettings()
+	settings.Enabled = true
+	settings.Model = "test-model"
+	settings.HistoryEnabled = true
+	settings.HistoryCount = 10
+	history := NewConversationHistory()
+
+	requests := []AssistRequest{
+		{
+			Instruction:  "first",
+			AppBundleID:  "notepad.exe",
+			CustomPrompt: "Use Notepad-specific style.",
+		},
+		{
+			Instruction: "second",
+			AppBundleID: "chrome.exe",
+		},
+		{
+			Instruction: "third",
+			AppBundleID: "chrome.exe",
+		},
+	}
+	for _, request := range requests {
+		if _, err := RunAssistWithHistory(client, settings, request, history); err != nil {
+			t.Fatalf("RunAssistWithHistory returned an error: %v", err)
+		}
+	}
+
+	var switched chatRequest
+	if err := json.Unmarshal([]byte(client.bodies[1]), &switched); err != nil {
+		t.Fatal(err)
+	}
+	if len(switched.Messages) != 2 {
+		t.Fatalf("app switch replayed previous history: %#v", switched.Messages)
+	}
+
+	var continued chatRequest
+	if err := json.Unmarshal([]byte(client.bodies[2]), &continued); err != nil {
+		t.Fatal(err)
+	}
+	if len(continued.Messages) != 4 {
+		t.Fatalf("same-app request did not retain history: %#v", continued.Messages)
+	}
+}
+
 func TestLMStudioHistoryUsesStatefulChatAndRollsOverAtLimit(t *testing.T) {
 	client := &queuedChatClient{responses: []string{
 		lmStudioResponse(t, "ANSWER\nfirst answer", "resp_first"),

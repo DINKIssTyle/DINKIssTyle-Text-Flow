@@ -82,6 +82,7 @@ func RunAssistWithHistory(
 	history.mu.Lock()
 	defer history.mu.Unlock()
 	history.prepareLocked(settings)
+	history.prepareRequestLocked(request)
 
 	if settings.Provider == ProviderLMStudio {
 		return runLMStudioStatefulAssist(client, settings, request, history)
