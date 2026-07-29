@@ -134,11 +134,85 @@ func TestLMStudioHistoryUsesStatefulChatAndRollsOverAtLimit(t *testing.T) {
 	if first.PreviousResponseID != "" {
 		t.Fatalf("first request unexpectedly continued a chat: %q", first.PreviousResponseID)
 	}
+	if first.SystemPrompt == "" {
+		t.Fatal("first request did not include a system prompt")
+	}
 	if second.PreviousResponseID != "resp_first" {
 		t.Fatalf("second request previous_response_id = %q", second.PreviousResponseID)
 	}
+	if second.SystemPrompt != "" {
+		t.Fatal("continued request unexpectedly repeated the system prompt")
+	}
+	var secondFields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(client.bodies[1]), &secondFields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := secondFields["system_prompt"]; exists {
+		t.Fatal("continued request serialized the system_prompt field")
+	}
 	if third.PreviousResponseID != "" {
 		t.Fatalf("third request should start a new bounded chain: %q", third.PreviousResponseID)
+	}
+	if third.SystemPrompt == "" {
+		t.Fatal("new bounded chain did not include a system prompt")
+	}
+}
+
+func TestLMStudioHistoryStartsNewChainWhenSystemPromptChanges(t *testing.T) {
+	client := &queuedChatClient{responses: []string{
+		lmStudioResponse(t, "first answer", "resp_first"),
+		lmStudioResponse(t, `{"mode":"REPLACE","content":"second answer"}`, "resp_second"),
+		lmStudioResponse(t, `{"mode":"REPLACE","content":"third answer"}`, "resp_third"),
+	}}
+	settings := DefaultSettings()
+	settings.Enabled = true
+	settings.Provider = ProviderLMStudio
+	settings.Model = "local-model"
+	settings.HistoryEnabled = true
+	settings.HistoryCount = 10
+	history := NewConversationHistory()
+
+	requests := []AssistRequest{
+		{Instruction: "first", ContextKind: ContextNone},
+		{
+			Instruction: "summarize",
+			ContextKind: ContextSelectedText,
+			ContextText: "selected text",
+			CanReplace:  true,
+		},
+		{
+			Instruction: "rewrite",
+			ContextKind: ContextSelectedText,
+			ContextText: "selected text",
+			CanReplace:  true,
+		},
+	}
+	for _, request := range requests {
+		if _, err := RunAssistWithHistory(client, settings, request, history); err != nil {
+			t.Fatalf("RunAssistWithHistory returned an error: %v", err)
+		}
+	}
+
+	var first, second, third lmStudioChatRequest
+	for index, target := range []*lmStudioChatRequest{&first, &second, &third} {
+		if err := json.Unmarshal([]byte(client.bodies[index]), target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if first.SystemPrompt != BuildSystemPrompt(false) {
+		t.Fatal("first request did not include the read-only system prompt")
+	}
+	if second.PreviousResponseID != "" {
+		t.Fatalf("changed system prompt continued the old chain: %q", second.PreviousResponseID)
+	}
+	if second.SystemPrompt != BuildSystemPrompt(true) {
+		t.Fatal("new chain did not include the editable-selection system prompt")
+	}
+	if third.PreviousResponseID != "resp_second" {
+		t.Fatalf("unchanged system prompt did not continue the new chain: %q", third.PreviousResponseID)
+	}
+	if third.SystemPrompt != "" {
+		t.Fatal("continued request unexpectedly repeated the system prompt")
 	}
 }
 

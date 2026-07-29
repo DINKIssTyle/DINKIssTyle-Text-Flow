@@ -156,7 +156,7 @@ func runOpenAICompatibleAssist(
 type lmStudioChatRequest struct {
 	Model              string   `json:"model"`
 	Input              any      `json:"input"`
-	SystemPrompt       string   `json:"system_prompt"`
+	SystemPrompt       string   `json:"system_prompt,omitempty"`
 	Temperature        *float64 `json:"temperature,omitempty"`
 	Store              bool     `json:"store"`
 	PreviousResponseID string   `json:"previous_response_id,omitempty"`
@@ -190,12 +190,19 @@ func runLMStudioStatefulAssist(
 			{Type: "image", DataURL: request.ImageDataURL},
 		}
 	}
+	systemPrompt := BuildSystemPrompt(CanReplaceSelectedText(request))
+	previousResponseID := history.prepareLMStudioTurnLocked(
+		settings.HistoryCount,
+		systemPrompt,
+	)
 	payload := lmStudioChatRequest{
 		Model:              settings.Model,
 		Input:              input,
-		SystemPrompt:       BuildSystemPrompt(CanReplaceSelectedText(request)),
 		Store:              true,
-		PreviousResponseID: history.prepareLMStudioTurnLocked(settings.HistoryCount),
+		PreviousResponseID: previousResponseID,
+	}
+	if previousResponseID == "" {
+		payload.SystemPrompt = systemPrompt
 	}
 	if settings.Temperature > 0 {
 		temperature := settings.Temperature

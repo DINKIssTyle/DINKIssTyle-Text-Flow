@@ -21,8 +21,9 @@ type ConversationHistory struct {
 
 	openAITurns []conversationTurn
 
-	lmStudioResponseID string
-	lmStudioTurnCount  int
+	lmStudioResponseID   string
+	lmStudioSystemPrompt string
+	lmStudioTurnCount    int
 }
 
 func NewConversationHistory() *ConversationHistory {
@@ -50,6 +51,7 @@ func (history *ConversationHistory) resetLocked() {
 	history.signature = ""
 	history.openAITurns = nil
 	history.lmStudioResponseID = ""
+	history.lmStudioSystemPrompt = ""
 	history.lmStudioTurnCount = 0
 }
 
@@ -78,10 +80,20 @@ func (history *ConversationHistory) appendOpenAITurnLocked(user, assistant strin
 	}
 }
 
-func (history *ConversationHistory) prepareLMStudioTurnLocked(limit int) string {
-	if history.lmStudioTurnCount >= limit {
+func (history *ConversationHistory) prepareLMStudioTurnLocked(
+	limit int,
+	systemPrompt string,
+) string {
+	systemPrompt = strings.TrimSpace(systemPrompt)
+	if history.lmStudioTurnCount >= limit ||
+		(history.lmStudioSystemPrompt != "" &&
+			history.lmStudioSystemPrompt != systemPrompt) {
 		history.lmStudioResponseID = ""
+		history.lmStudioSystemPrompt = ""
 		history.lmStudioTurnCount = 0
+	}
+	if history.lmStudioResponseID == "" {
+		history.lmStudioSystemPrompt = systemPrompt
 	}
 	return history.lmStudioResponseID
 }
