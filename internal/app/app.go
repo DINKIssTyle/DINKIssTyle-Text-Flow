@@ -613,6 +613,14 @@ func (a *App) BrowseAIPromptApp() (platform.AppInfo, error) {
 	return platform.AppInfoFromBundlePath(path), nil
 }
 
+func (a *App) ListRunningApps() []platform.AppInfo {
+	var apps []platform.AppInfo
+	application.InvokeSync(func() {
+		apps = platform.ListRunningApps()
+	})
+	return apps
+}
+
 func enclosingAppBundlePath(path string) string {
 	path = strings.TrimSpace(path)
 	for path != "" && path != "." && path != string(filepath.Separator) {

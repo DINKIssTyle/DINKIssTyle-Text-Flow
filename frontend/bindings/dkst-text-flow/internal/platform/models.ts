@@ -5,6 +5,7 @@ export interface AppInfo {
     "name": string;
     "bundleId": string;
     "path": string;
+    "iconDataUrl": string;
 }
 
 export interface Status {

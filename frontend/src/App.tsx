@@ -36,6 +36,7 @@ import {
     CancelTTSModelDownload,
     ListLabels,
     ListSnippetsByLabel,
+    ListRunningApps,
     RequestAccessibilityPermission,
     RequestScreenRecordingPermission,
     ReplaceSelectedText,
@@ -55,7 +56,7 @@ import {
 import { Application, Clipboard, Events, System, Window } from "@wailsio/runtime";
 
 import { Snippet, SnippetInput, Label, LabelInput, DashboardStats, DailyTypingStat } from "../bindings/dkst-text-flow/internal/storage/models";
-import { Status as PlatformStatus } from "../bindings/dkst-text-flow/internal/platform/models";
+import { AppInfo, Status as PlatformStatus } from "../bindings/dkst-text-flow/internal/platform/models";
 import { Settings as AISettings } from "../bindings/dkst-text-flow/internal/ai/models";
 import { GeneralSettings, AIPromptRule, AIPromptProfile, AIPromptProfileInput, AIPromptSettings } from "../bindings/dkst-text-flow/internal/app/models";
 
@@ -81,6 +82,10 @@ type PreparedSound = {
     buffer: AudioBuffer;
     startOffset: number;
 };
+
+type AppPickerTarget =
+    | { kind: 'create' }
+    | { kind: 'profile'; profileID: string };
 
 const aiHUDCollapsedHeight = 74;
 const aiHUDMaxHeight = 620;
@@ -639,6 +644,11 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
     const [detailMode, setDetailMode] = useState<'all' | 'label' | 'snippet'>('all');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false);
+    const [appPickerTarget, setAppPickerTarget] = useState<AppPickerTarget | null>(null);
+    const [appPickerStage, setAppPickerStage] = useState<'method' | 'running'>('method');
+    const [runningApps, setRunningApps] = useState<AppInfo[]>([]);
+    const [runningAppsLoading, setRunningAppsLoading] = useState(false);
+    const [selectedRunningAppBundleID, setSelectedRunningAppBundleID] = useState('');
     const [requestingPermission, setRequestingPermission] = useState<'accessibility' | 'screenRecording' | null>(null);
     const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
     const [form, setForm] = useState<SnippetInput>(emptyInput);
@@ -728,6 +738,19 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         window.addEventListener('keydown', closeOnEscape);
         return () => window.removeEventListener('keydown', closeOnEscape);
     }, [isPermissionModalOpen]);
+
+    useEffect(() => {
+        if (!appPickerTarget) {
+            return;
+        }
+        const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setAppPickerTarget(null);
+            }
+        };
+        window.addEventListener('keydown', closeOnEscape);
+        return () => window.removeEventListener('keydown', closeOnEscape);
+    }, [appPickerTarget]);
 
     function showSaveToast(message: string) {
         saveToastSequenceRef.current += 1;
@@ -1708,14 +1731,30 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         }
     }
 
-    async function createPromptProfile() {
-        const current = platformStatus;
+    function openAppPicker(target: AppPickerTarget) {
+        setError('');
+        setAppPickerTarget(target);
+        setAppPickerStage('method');
+        setRunningApps([]);
+        setSelectedRunningAppBundleID('');
+        setRunningAppsLoading(false);
+    }
+
+    function closeAppPicker() {
+        setAppPickerTarget(null);
+        setAppPickerStage('method');
+        setRunningApps([]);
+        setSelectedRunningAppBundleID('');
+        setRunningAppsLoading(false);
+    }
+
+    async function createPromptProfile(appInfo: AppInfo) {
         setPromptSaving(true);
         setError('');
         try {
             const saved = await CreateAIPromptProfile({
-                appName: current?.activeAppName || 'New App',
-                appBundleId: current?.activeBundleId || '',
+                appName: appInfo.name || 'New App',
+                appBundleId: appInfo.bundleId || '',
                 ...emptyPromptRule,
             });
             const normalized = normalizeAIPromptSettings(saved);
@@ -1726,6 +1765,68 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         } finally {
             setPromptSaving(false);
         }
+    }
+
+    async function applyPickedApp(target: AppPickerTarget, appInfo: AppInfo) {
+        if (!appInfo?.bundleId && !appInfo?.name) {
+            return;
+        }
+        closeAppPicker();
+        if (target.kind === 'create') {
+            await createPromptProfile(appInfo);
+            return;
+        }
+        const profile = (aiPromptSettings?.profiles || []).find((item) => item.id === target.profileID);
+        if (!profile) {
+            return;
+        }
+        updatePromptProfile(profile.id, {
+            appName: appInfo.name || profile.appName,
+            appBundleId: appInfo.bundleId || profile.appBundleId,
+        });
+    }
+
+    async function showRunningAppPicker() {
+        setAppPickerStage('running');
+        setRunningAppsLoading(true);
+        setSelectedRunningAppBundleID('');
+        setError('');
+        try {
+            const apps = await ListRunningApps();
+            setRunningApps(apps || []);
+        } catch (err) {
+            setRunningApps([]);
+            setError(String(err));
+        } finally {
+            setRunningAppsLoading(false);
+        }
+    }
+
+    async function chooseDirectApp() {
+        const target = appPickerTarget;
+        if (!target) {
+            return;
+        }
+        closeAppPicker();
+        setError('');
+        try {
+            const appInfo = await BrowseAIPromptApp();
+            if (!appInfo?.bundleId && !appInfo?.name) {
+                return;
+            }
+            await applyPickedApp(target, appInfo);
+        } catch (err) {
+            setError(String(err));
+        }
+    }
+
+    async function chooseSelectedRunningApp(appInfo?: AppInfo) {
+        const target = appPickerTarget;
+        const selected = appInfo || runningApps.find((app) => app.bundleId === selectedRunningAppBundleID);
+        if (!target || !selected) {
+            return;
+        }
+        await applyPickedApp(target, selected);
     }
 
     async function savePromptProfile(profile: AIPromptProfile) {
@@ -1761,22 +1862,6 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             setError(String(err));
         } finally {
             setPromptSaving(false);
-        }
-    }
-
-    async function browsePromptProfileApp(profile: AIPromptProfile) {
-        setError('');
-        try {
-            const appInfo = await BrowseAIPromptApp();
-            if (!appInfo?.bundleId && !appInfo?.name) {
-                return;
-            }
-            updatePromptProfile(profile.id, {
-                appName: appInfo.name || profile.appName,
-                appBundleId: appInfo.bundleId || profile.appBundleId,
-            });
-        } catch (err) {
-            setError(String(err));
         }
     }
 
@@ -1926,8 +2011,9 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
     }
 
     function removeScreenshot() {
+        // Match screenshot expansion: keep the HUD's bottom edge fixed while it collapses.
+        aiHUDGrowUpRef.current = true;
         setAIScreenshot(null);
-        window.requestAnimationFrame(resizeAIHUD);
     }
 
     async function stopAIRequest() {
@@ -2610,7 +2696,7 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                                     <h1>{t('aiPrompt')}</h1>
                                     <p>{t('aiPromptDescription')}</p>
                                 </div>
-                                <button className="primary-button icon-button" onClick={createPromptProfile} disabled={promptSaving} aria-label={t('addAIPrompt')} title={t('addAIPrompt')}>
+                                <button className="primary-button icon-button" onClick={() => openAppPicker({ kind: 'create' })} disabled={promptSaving} aria-label={t('addAIPrompt')} title={t('addAIPrompt')}>
                                     <span className="material-symbols-rounded" aria-hidden="true">add</span>
                                 </button>
                             </div>
@@ -2681,7 +2767,7 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                                                     {t('bundleId')}
                                                     <input value={profile.appBundleId} onChange={(event) => updatePromptProfile(profile.id, { appBundleId: event.target.value })} placeholder="com.apple.Terminal" />
                                                 </label>
-                                                <button type="button" onClick={() => browsePromptProfileApp(profile)}>{t('browse')}</button>
+                                                <button type="button" onClick={() => openAppPicker({ kind: 'profile', profileID: profile.id })}>{t('change')}</button>
                                             </div>
                                             <PromptRuleEditor rule={profile} onChange={(patch) => updatePromptProfile(profile.id, patch)} t={t} />
                                         </>
@@ -2778,23 +2864,59 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                                 </button>
                             </div>}
                         </div>
-                        <div className="settings-list">
-                            {isMacOS && <div className={platformStatus?.accessibilityTrusted ? 'settings-status success' : 'settings-status danger'}>
-                                <span>{t('accessibilityPermission')}</span>
-                                <strong>{platformStatus?.accessibilityTrusted ? t('granted') : t('required')}</strong>
-                            </div>}
-                            {isMacOS && <div className={platformStatus?.screenRecordingGranted ? 'settings-status success' : 'settings-status danger'}>
-                                <span>{t('screenRecordingPermission')}</span>
-                                <strong>{platformStatus?.screenRecordingGranted ? t('granted') : t('required')}</strong>
-                            </div>}
-                            <div>
-                                <span>{t('aiActiveStatus')}</span>
-                                <strong>{aiSettings?.enabled ? t('enabled') : t('disabled')}</strong>
+                        <div className="settings-list platform-status-list">
+                            {!isMacOS && (
+                                <>
+                                    <div className="settings-status-card settings-status-placeholder" aria-hidden="true" />
+                                    <div className="settings-status-card settings-status-placeholder" aria-hidden="true" />
+                                </>
+                            )}
+                            {isMacOS && (
+                                <div className={`settings-status-card ${platformStatus?.accessibilityTrusted ? 'success' : 'danger'}`}>
+                                    <span className="settings-status-label">
+                                        <span className="material-symbols-rounded settings-role-icon" aria-hidden="true">keyboard_keys</span>
+                                        <span className="settings-status-label-text">{t('accessibilityPermission')}</span>
+                                    </span>
+                                    <span
+                                        className="material-symbols-rounded settings-state-icon"
+                                        role="img"
+                                        aria-label={platformStatus?.accessibilityTrusted ? t('granted') : t('permissionMissing')}
+                                        title={platformStatus?.accessibilityTrusted ? t('granted') : t('permissionMissing')}
+                                    >
+                                        {platformStatus?.accessibilityTrusted ? 'verified' : 'do_not_touch'}
+                                    </span>
+                                </div>
+                            )}
+                            {isMacOS && (
+                                <div className={`settings-status-card ${platformStatus?.screenRecordingGranted ? 'success' : 'danger'}`}>
+                                    <span className="settings-status-label">
+                                        <span className="material-symbols-rounded settings-role-icon" aria-hidden="true">screenshot_region</span>
+                                        <span className="settings-status-label-text">{t('screenRecordingPermission')}</span>
+                                    </span>
+                                    <span
+                                        className="material-symbols-rounded settings-state-icon"
+                                        role="img"
+                                        aria-label={platformStatus?.screenRecordingGranted ? t('granted') : t('permissionMissing')}
+                                        title={platformStatus?.screenRecordingGranted ? t('granted') : t('permissionMissing')}
+                                    >
+                                        {platformStatus?.screenRecordingGranted ? 'verified' : 'do_not_touch'}
+                                    </span>
+                                </div>
+                            )}
+                            <div className={`settings-status-card ${aiSettings?.enabled ? 'success' : 'danger'}`}>
+                                <span className="settings-status-label">
+                                    <span className="material-symbols-rounded settings-role-icon" aria-hidden="true">wand_stars</span>
+                                    <span className="settings-status-label-text">{t('aiActiveStatus')}</span>
+                                </span>
+                                <span
+                                    className="material-symbols-rounded settings-state-icon"
+                                    role="img"
+                                    aria-label={aiSettings?.enabled ? t('enabled') : t('disabled')}
+                                    title={aiSettings?.enabled ? t('enabled') : t('disabled')}
+                                >
+                                    {aiSettings?.enabled ? 'verified' : 'do_not_touch'}
+                                </span>
                             </div>
-                            {isMacOS && <div>
-                                <span>{t('secureInput')}</span>
-                                <strong>{platformStatus?.secureInputActive ? t('active') : t('notDetected')}</strong>
-                            </div>}
                         </div>
                         {aiSettings && (
                             <form
@@ -3364,6 +3486,114 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                     </div>
                 )}
             </main>
+
+            {appPickerTarget && (
+                <div
+                    className="modal-backdrop app-picker-backdrop"
+                    onClick={(event) => {
+                        if (event.currentTarget === event.target) {
+                            closeAppPicker();
+                        }
+                    }}
+                >
+                    <section
+                        className="modal app-picker-modal"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="app-picker-title"
+                        aria-describedby="app-picker-description"
+                    >
+                        <div className="app-picker-header">
+                            <div className="app-picker-header-icon" aria-hidden="true">
+                                <span className="material-symbols-rounded">apps</span>
+                            </div>
+                            <div>
+                                <h2 id="app-picker-title">
+                                    {t(appPickerStage === 'running' ? 'runningAppsTitle' : 'appPickerTitle')}
+                                </h2>
+                                <p id="app-picker-description">
+                                    {t(appPickerStage === 'running' ? 'runningAppsDescription' : 'appPickerDescription')}
+                                </p>
+                            </div>
+                        </div>
+
+                        {appPickerStage === 'method' ? (
+                            <div className="app-picker-methods">
+                                <button type="button" onClick={() => void showRunningAppPicker()}>
+                                    <span className="material-symbols-rounded" aria-hidden="true">dynamic_feed</span>
+                                    <strong>{t('chooseRunningApp')}</strong>
+                                    <span>{t('chooseRunningAppDescription')}</span>
+                                </button>
+                                <button type="button" onClick={() => void chooseDirectApp()}>
+                                    <span className="material-symbols-rounded" aria-hidden="true">folder_open</span>
+                                    <strong>{t('chooseDirectApp')}</strong>
+                                    <span>{t('chooseDirectAppDescription')}</span>
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="running-app-picker">
+                                <div className="running-app-list" role="listbox" aria-label={t('runningAppsTitle')}>
+                                    {runningAppsLoading ? (
+                                        <div className="app-picker-empty">
+                                            <span className="button-spinner" aria-hidden="true" />
+                                            <span>{t('runningAppsLoading')}</span>
+                                        </div>
+                                    ) : runningApps.length === 0 ? (
+                                        <div className="app-picker-empty">{t('noRunningApps')}</div>
+                                    ) : runningApps.map((app) => (
+                                        <button
+                                            key={app.bundleId}
+                                            type="button"
+                                            role="option"
+                                            aria-selected={selectedRunningAppBundleID === app.bundleId}
+                                            className={`running-app-row ${selectedRunningAppBundleID === app.bundleId ? 'selected' : ''}`}
+                                            onClick={() => setSelectedRunningAppBundleID(app.bundleId)}
+                                            onDoubleClick={() => void chooseSelectedRunningApp(app)}
+                                        >
+                                            {app.iconDataUrl ? (
+                                                <img src={app.iconDataUrl} alt="" />
+                                            ) : (
+                                                <span className="material-symbols-rounded running-app-fallback-icon" aria-hidden="true">application_mac</span>
+                                            )}
+                                            <span className="running-app-details">
+                                                <strong>{app.name}</strong>
+                                                <span>{app.bundleId}</span>
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="modal-actions app-picker-actions">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setAppPickerStage('method');
+                                            setSelectedRunningAppBundleID('');
+                                        }}
+                                    >
+                                        {t('back')}
+                                    </button>
+                                    <span className="app-picker-action-spacer" />
+                                    <button type="button" onClick={closeAppPicker}>{t('cancel')}</button>
+                                    <button
+                                        className="primary-button"
+                                        type="button"
+                                        disabled={!selectedRunningAppBundleID || runningAppsLoading}
+                                        onClick={() => void chooseSelectedRunningApp()}
+                                    >
+                                        {t('selectApp')}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {appPickerStage === 'method' && (
+                            <div className="modal-actions app-picker-actions">
+                                <button type="button" onClick={closeAppPicker}>{t('cancel')}</button>
+                            </div>
+                        )}
+                    </section>
+                </div>
+            )}
 
             {isPermissionModalOpen && (
                 <div

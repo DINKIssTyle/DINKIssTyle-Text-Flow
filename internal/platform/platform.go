@@ -12,9 +12,10 @@ type Status struct {
 }
 
 type AppInfo struct {
-	Name     string `json:"name"`
-	BundleID string `json:"bundleId"`
-	Path     string `json:"path"`
+	Name        string `json:"name"`
+	BundleID    string `json:"bundleId"`
+	Path        string `json:"path"`
+	IconDataURL string `json:"iconDataUrl"`
 }
 
 type Controller interface {
@@ -53,6 +54,10 @@ func AppInfoFromProcess(processID int) AppInfo {
 
 func AppInfoFromBundlePath(path string) AppInfo {
 	return appInfoFromBundlePath(path)
+}
+
+func ListRunningApps() []AppInfo {
+	return listRunningApps()
 }
 
 func GetFrontmostPID() int {
