@@ -34,6 +34,35 @@ func TestDefaultGeneralSettingsLeavesFlowToggleHotkeyEmpty(t *testing.T) {
 	}
 }
 
+func TestNormalizeGeneralSettingsCanonicalizesPinShotHotkey(t *testing.T) {
+	shortcut, err := hotkey.Parse("cmd+shift+p")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings := NormalizeGeneralSettings(GeneralSettings{PinShotHotkey: "cmd+shift+p"})
+	if settings.PinShotHotkey != shortcut.Canonical {
+		t.Fatalf("PinShotHotkey = %q, want %q", settings.PinShotHotkey, shortcut.Canonical)
+	}
+}
+
+func TestNormalizeGeneralSettingsClearsInvalidPinShotHotkey(t *testing.T) {
+	settings := NormalizeGeneralSettings(GeneralSettings{PinShotHotkey: "P"})
+	if settings.PinShotHotkey != "" {
+		t.Fatalf("PinShotHotkey = %q, want empty", settings.PinShotHotkey)
+	}
+}
+
+func TestDefaultGeneralSettingsEnablesPinShotWithoutHotkey(t *testing.T) {
+	settings := DefaultGeneralSettings()
+	if !settings.PinShotEnabled {
+		t.Fatal("PinShotEnabled = false, want true")
+	}
+	if settings.PinShotHotkey != "" {
+		t.Fatalf("PinShotHotkey = %q, want empty", settings.PinShotHotkey)
+	}
+}
+
 func TestNormalizeGeneralSettingsCanonicalizesOCRHotkey(t *testing.T) {
 	shortcut, err := hotkey.Parse("cmd+shift+o")
 	if err != nil {
@@ -130,6 +159,17 @@ func TestValidateUniqueHotkeysRejectsDuplicateOCRAssignment(t *testing.T) {
 	settings := ai.Settings{Hotkey: "Cmd+Shift+O", TTSShortcut: "Cmd+Shift+T"}
 	if err := validateUniqueHotkeys(general, settings); err == nil {
 		t.Fatal("expected duplicate OCR hotkey error")
+	}
+}
+
+func TestValidateUniqueHotkeysRejectsDuplicatePinShotAssignment(t *testing.T) {
+	general := GeneralSettings{
+		PinShotHotkey: "Cmd+Shift+P",
+		OCRHotkey:     "Cmd+Shift+O",
+	}
+	settings := ai.Settings{Hotkey: "Cmd+Shift+P", TTSShortcut: "Cmd+Shift+T"}
+	if err := validateUniqueHotkeys(general, settings); err == nil {
+		t.Fatal("expected duplicate Pin Shot hotkey error")
 	}
 }
 

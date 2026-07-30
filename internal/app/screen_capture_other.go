@@ -7,7 +7,10 @@ import (
 	"errors"
 )
 
-func (a *App) beginPlatformScreenRegionCapture(_ context.Context) error {
+func (a *App) beginPlatformScreenRegionCapture(
+	_ context.Context,
+	_ screenCapturePurpose,
+) error {
 	return errors.New("screen region capture is not supported on this platform")
 }
 

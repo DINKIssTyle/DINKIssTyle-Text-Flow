@@ -50,6 +50,8 @@ type GeneralSettings struct {
 	StartAtLogin           bool   `json:"startAtLogin"`
 	SoundName              string `json:"soundName"`
 	FlowToggleHotkey       string `json:"flowToggleHotkey"`
+	PinShotEnabled         bool   `json:"pinShotEnabled"`
+	PinShotHotkey          string `json:"pinShotHotkey"`
 	AppleVisionOCREnabled  bool   `json:"appleVisionOcrEnabled"`
 	OCRHotkey              string `json:"ocrHotkey"`
 	OCRRecognitionLanguage string `json:"ocrRecognitionLanguage"`
@@ -115,8 +117,15 @@ type App struct {
 	screenCaptureActive     bool
 	screenCaptureCompleting bool
 	screenCaptureWindows    []application.Window
-	screenCaptureForOCR     bool
+	screenCaptureWindowByID map[string]application.Window
+	screenCapturePurpose    screenCapturePurpose
+	screenCapturePlacement  *screenCapturePlacement
 	screenCaptureSourcePID  int
+	screenCaptureRestoreAI  bool
+	screenCaptureRestoreOCR bool
+	floatingCaptureMu       sync.RWMutex
+	floatingCaptures        map[string]*floatingCapture
+	nextFloatingCaptureID   uint64
 	ocrProcessingMu         sync.Mutex
 	ocrProcessing           bool
 	ocrWarmupMu             sync.Mutex
@@ -139,6 +148,7 @@ func New(menuIcon []byte, pausedMenuIcon []byte) *App {
 		expansionSoundEvents:    make(chan struct{}, 8),
 		menuIcon:                append([]byte(nil), menuIcon...),
 		pausedMenuIcon:          append([]byte(nil), pausedMenuIcon...),
+		floatingCaptures:        make(map[string]*floatingCapture),
 	}
 }
 
@@ -172,6 +182,7 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 func (a *App) ServiceShutdown() error {
 	appInst := application.Get()
 	a.cancelScreenRegionCapture(false)
+	a.closeAllFloatingCaptures()
 	if a.aiClient != nil {
 		a.aiClient.Cancel()
 	}
@@ -387,13 +398,16 @@ func (a *App) reconcileFlowStatus(emit bool) platform.Status {
 
 	if a.trayManager != nil {
 		ocrEnabled := false
+		pinShotEnabled := false
 		if settings, err := a.GetGeneralSettings(); err == nil {
 			ocrEnabled = settings.AppleVisionOCREnabled
+			pinShotEnabled = settings.PinShotEnabled
 		}
 		a.trayManager.UpdateState(tray.State{
-			FlowPaused: paused,
-			Running:    status.FlowEngineRunning,
-			OCREnabled: ocrEnabled,
+			FlowPaused:     paused,
+			Running:        status.FlowEngineRunning,
+			PinShotEnabled: pinShotEnabled,
+			OCREnabled:     ocrEnabled,
 		})
 	}
 	if emit {
@@ -921,6 +935,13 @@ func (a *App) configureSystemTray(appInst *application.App) {
 		OCR: func() {
 			go a.beginOCRScreenRegionCapture(platform.GetFrontmostPID())
 		},
+		PinShot: func() {
+			go func() {
+				if err := a.BeginPinShotScreenRegionCapture(); err != nil {
+					println("failed to begin Pin Shot:", err.Error())
+				}
+			}()
+		},
 		ShowMainWindow: func() {
 			go a.ShowMainWindow()
 		},
@@ -988,6 +1009,20 @@ func (a *App) configureGlobalShortcuts() {
 		})
 		if err != nil {
 			println("failed to register Flow toggle hotkey:", err.Error())
+		}
+	}
+	if err == nil &&
+		generalSettings.PinShotEnabled &&
+		generalSettings.PinShotHotkey != "" {
+		err = appInst.GlobalShortcut.Register(generalSettings.PinShotHotkey, func() {
+			go func() {
+				if beginErr := a.BeginPinShotScreenRegionCapture(); beginErr != nil {
+					println("failed to begin Pin Shot:", beginErr.Error())
+				}
+			}()
+		})
+		if err != nil {
+			println("failed to register Pin Shot hotkey:", err.Error())
 		}
 	}
 	if runtime.GOOS == "darwin" &&
@@ -1443,6 +1478,8 @@ func DefaultGeneralSettings() GeneralSettings {
 		TypingTrendEnabled:     true,
 		SoundName:              "None",
 		FlowToggleHotkey:       "",
+		PinShotEnabled:         true,
+		PinShotHotkey:          "",
 		AppleVisionOCREnabled:  false,
 		OCRHotkey:              "",
 		OCRRecognitionLanguage: ocr.LanguageAutomatic,
@@ -1514,6 +1551,7 @@ func validateUniqueHotkeys(general GeneralSettings, settings ai.Settings) error 
 		value string
 	}{
 		{name: "Flow toggle hotkey", value: general.FlowToggleHotkey},
+		{name: "Pin Shot hotkey", value: general.PinShotHotkey},
 		{name: "OCR hotkey", value: general.OCRHotkey},
 		{name: "Prompt hotkey", value: settings.Hotkey},
 		{name: "TTS hotkey", value: settings.TTSShortcut},
@@ -1558,6 +1596,15 @@ func NormalizeGeneralSettings(settings GeneralSettings) GeneralSettings {
 			settings.FlowToggleHotkey = parsed.Canonical
 		} else {
 			settings.FlowToggleHotkey = ""
+		}
+	}
+
+	settings.PinShotHotkey = strings.TrimSpace(settings.PinShotHotkey)
+	if settings.PinShotHotkey != "" {
+		if parsed, err := hotkey.Parse(settings.PinShotHotkey); err == nil {
+			settings.PinShotHotkey = parsed.Canonical
+		} else {
+			settings.PinShotHotkey = ""
 		}
 	}
 

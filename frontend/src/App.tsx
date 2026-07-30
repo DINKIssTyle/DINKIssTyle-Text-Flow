@@ -1,4 +1,4 @@
-import { Children, cloneElement, CSSProperties, FormEvent, isValidElement, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { Children, cloneElement, CSSProperties, FormEvent, isValidElement, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement, ReactNode, useEffect, useMemo, useRef, useState, WheelEvent as ReactWheelEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
@@ -15,6 +15,8 @@ import {
     CancelScreenRegionCapture,
     ConfirmLabelDeletion,
     ConfirmSnippetDeletion,
+    CloseFloatingCapture,
+    CopyFloatingCapture,
     CompleteScreenRegionCapture,
     CreateAIPromptProfile,
     CreateLabel,
@@ -28,6 +30,7 @@ import {
     GetDashboard,
     GetGeneralSettings,
     GetExternalFrontmostProcessID,
+    GetFloatingCapture,
     GetOCRLanguages,
     GetPlatformStatus,
     GetTTSModelStatus,
@@ -44,9 +47,11 @@ import {
     RequestScreenRecordingPermission,
     ReplayLastTTSAudio,
     ReplaceSelectedText,
+    ResetFloatingCaptureSize,
     ResizeAIPromptWindow,
     ResizeOCRWindow,
     RunAIAssist,
+    SaveFloatingCapture,
     SaveLastTTSAudio,
     SaveApplicationSettings,
     SaveCommonAIPromptRule,
@@ -82,6 +87,15 @@ type ScreenCaptureAttachment = {
     mimeType: string;
     width: number;
     height: number;
+};
+
+type FloatingCaptureInfo = {
+    id: string;
+    dataUrl: string;
+    pixelWidth: number;
+    pixelHeight: number;
+    originalWidth: number;
+    originalHeight: number;
 };
 
 type PreparedSound = {
@@ -271,7 +285,13 @@ function normalizedHotkey(value: string) {
 }
 
 function hasDuplicateHotkeys(general: GeneralSettings, settings: AISettings) {
-    const values = [general.flowToggleHotkey, general.ocrHotkey, settings.hotkey, settings.ttsShortcut]
+    const values = [
+        general.flowToggleHotkey,
+        general.pinShotHotkey,
+        general.ocrHotkey,
+        settings.hotkey,
+        settings.ttsShortcut,
+    ]
         .map((value) => normalizedHotkey(value || ''))
         .filter(Boolean);
     return new Set(values).size !== values.length;
@@ -297,15 +317,17 @@ type HotkeyCaptureControlProps = {
     onStop: () => void;
     onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
     onClear: () => void;
+    disabled?: boolean;
     t: Translator;
 };
 
-function HotkeyCaptureControl({ value, recording, onStart, onStop, onKeyDown, onClear, t }: HotkeyCaptureControlProps) {
+function HotkeyCaptureControl({ value, recording, onStart, onStop, onKeyDown, onClear, disabled = false, t }: HotkeyCaptureControlProps) {
     return (
         <div className={"hotkey-control" + (value ? " has-value" : "")}>
             <button
                 type="button"
                 className={"hotkey-capture" + (recording ? " recording" : "")}
+                disabled={disabled}
                 onClick={(event) => {
                     onStart();
                     event.currentTarget.focus();
@@ -319,6 +341,7 @@ function HotkeyCaptureControl({ value, recording, onStart, onStop, onKeyDown, on
                 <button
                     type="button"
                     className="hotkey-clear"
+                    disabled={disabled}
                     onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
@@ -473,6 +496,7 @@ function ScreenCaptureOverlay({ screenID }: { screenID: string }) {
 
     useEffect(() => {
         document.documentElement.classList.add('capture-mode');
+        Window.SetBackgroundColour(0, 0, 0, 0).catch(() => {});
         return () => document.documentElement.classList.remove('capture-mode');
     }, []);
 
@@ -551,11 +575,12 @@ function ScreenCaptureOverlay({ screenID }: { screenID: string }) {
         setCurrent(point);
         setSubmitting(true);
         try {
+            const viewport = event.currentTarget.getBoundingClientRect();
             await CompleteScreenRegionCapture({
                 screenId: screenID,
                 ...nextSelection,
-                viewportWidth: window.innerWidth,
-                viewportHeight: window.innerHeight,
+                viewportWidth: viewport.width,
+                viewportHeight: viewport.height,
             });
         } catch (err) {
             setCaptureError(String(err));
@@ -598,11 +623,164 @@ function ScreenCaptureOverlay({ screenID }: { screenID: string }) {
     );
 }
 
+function FloatingCaptureWindow({ captureID }: { captureID: string }) {
+    const [capture, setCapture] = useState<FloatingCaptureInfo | null>(null);
+    const [opacity, setOpacity] = useState(1);
+    const [status, setStatus] = useState('');
+    const [error, setError] = useState('');
+    const statusTimerRef = useRef<number | null>(null);
+
+    useEffect(() => {
+        document.documentElement.classList.add('floating-capture-mode');
+        Window.SetBackgroundColour(0, 0, 0, 0).catch(() => {});
+        return () => {
+            document.documentElement.classList.remove('floating-capture-mode');
+            if (statusTimerRef.current !== null) {
+                window.clearTimeout(statusTimerRef.current);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        GetFloatingCapture(captureID)
+            .then((value) => {
+                setCapture(value as FloatingCaptureInfo);
+                setError('');
+            })
+            .catch((err) => setError(String(err)));
+    }, [captureID]);
+
+    function showStatus(message: string) {
+        setStatus(message);
+        if (statusTimerRef.current !== null) {
+            window.clearTimeout(statusTimerRef.current);
+        }
+        statusTimerRef.current = window.setTimeout(() => {
+            setStatus('');
+            statusTimerRef.current = null;
+        }, 850);
+    }
+
+    function adjustOpacity(event: ReactWheelEvent<HTMLDivElement>) {
+        event.preventDefault();
+        const direction = event.deltaY === 0 ? 0 : (event.deltaY > 0 ? -1 : 1);
+        if (direction === 0) {
+            return;
+        }
+        setOpacity((currentOpacity) => {
+            const nextOpacity = Math.max(
+                0.1,
+                Math.min(1, Math.round((currentOpacity + direction * 0.05) * 100) / 100),
+            );
+            showStatus(`${Math.round(nextOpacity * 100)}%`);
+            return nextOpacity;
+        });
+    }
+
+    async function saveCapture() {
+        try {
+            const saved = await SaveFloatingCapture(captureID);
+            if (saved) {
+                showStatus('Saved');
+            }
+        } catch (err) {
+            setError(String(err));
+        }
+    }
+
+    async function copyCapture() {
+        try {
+            await CopyFloatingCapture(captureID);
+            showStatus('Copied');
+        } catch (err) {
+            setError(String(err));
+        }
+    }
+
+    async function resetCaptureSize() {
+        try {
+            await ResetFloatingCaptureSize(captureID);
+            showStatus('100%');
+        } catch (err) {
+            setError(String(err));
+        }
+    }
+
+    useEffect(() => {
+        const handleShortcut = (event: globalThis.KeyboardEvent) => {
+            if ((!event.metaKey && !event.ctrlKey) || event.altKey || event.shiftKey) {
+                return;
+            }
+            const key = event.key.toLowerCase();
+            if (!['s', 'c', 'w', '1'].includes(key)) {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            setError('');
+            switch (key) {
+            case 's':
+                void saveCapture();
+                break;
+            case 'c':
+                void copyCapture();
+                break;
+            case '1':
+                void resetCaptureSize();
+                break;
+            case 'w':
+                void CloseFloatingCapture(captureID);
+                break;
+            }
+        };
+        window.addEventListener('keydown', handleShortcut, true);
+        return () => window.removeEventListener('keydown', handleShortcut, true);
+    }, [captureID]);
+
+    return (
+        <div className="floating-capture-surface" onWheel={adjustOpacity}>
+            {capture && (
+                <img
+                    className="floating-capture-image"
+                    src={capture.dataUrl}
+                    alt=""
+                    draggable={false}
+                    style={{ opacity }}
+                />
+            )}
+            <div className="floating-capture-toolbar" role="toolbar" aria-label="Pin Shot">
+                <button type="button" onClick={saveCapture} title="Save (⌘/Ctrl+S)" aria-label="Save">
+                    <span className="material-symbols-rounded" aria-hidden="true">save</span>
+                </button>
+                <button type="button" onClick={copyCapture} title="Copy (⌘/Ctrl+C)" aria-label="Copy">
+                    <span className="material-symbols-rounded" aria-hidden="true">content_copy</span>
+                </button>
+                <button type="button" onClick={resetCaptureSize} title="Reset to 100%" aria-label="Reset to 100%">
+                    <span className="floating-capture-reset-label" aria-hidden="true">1:1</span>
+                </button>
+                <button
+                    type="button"
+                    onClick={() => CloseFloatingCapture(captureID)}
+                    title="Close (⌘/Ctrl+W)"
+                    aria-label="Close"
+                >
+                    <span className="material-symbols-rounded" aria-hidden="true">close</span>
+                </button>
+            </div>
+            {status && <div className="floating-capture-status">{status}</div>}
+            {error && <div className="floating-capture-error" role="alert">{error}</div>}
+        </div>
+    );
+}
+
 function App() {
     const params = new URLSearchParams(window.location.search);
     const mode = params.get('mode');
     if (mode === 'capture') {
         return <ScreenCaptureOverlay screenID={params.get('screenId') || ''} />;
+    }
+    if (mode === 'floating') {
+        return <FloatingCaptureWindow captureID={params.get('id') || ''} />;
     }
     const hudMode = mode === 'ocr' ? 'ocr' : (mode === 'hud' ? 'ai' : null);
     return <MainApp hudMode={hudMode} />;
@@ -688,6 +866,7 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
     const [recordingHotkey, setRecordingHotkey] = useState(false);
     const [recordingTtsHotkey, setRecordingTtsHotkey] = useState(false);
     const [recordingFlowToggleHotkey, setRecordingFlowToggleHotkey] = useState(false);
+    const [recordingPinShotHotkey, setRecordingPinShotHotkey] = useState(false);
     const [recordingOCRHotkey, setRecordingOCRHotkey] = useState(false);
     const [hasBeenInvoked, setHasBeenInvoked] = useState(false);
     const [aiContext, setAIContext] = useState<AIInvocationContext>({
@@ -1546,6 +1725,8 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
         startAtLogin?: boolean;
         soundName?: string;
         flowToggleHotkey?: string;
+        pinShotEnabled?: boolean;
+        pinShotHotkey?: string;
         appleVisionOcrEnabled?: boolean;
         ocrHotkey?: string;
         ocrRecognitionLanguage?: string;
@@ -1560,6 +1741,8 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
             startAtLogin: settings.startAtLogin === true,
             soundName,
             flowToggleHotkey: settings.flowToggleHotkey || '',
+            pinShotEnabled: settings.pinShotEnabled !== false,
+            pinShotHotkey: settings.pinShotHotkey || '',
             appleVisionOcrEnabled: settings.appleVisionOcrEnabled === true,
             ocrHotkey: settings.ocrHotkey || '',
             ocrRecognitionLanguage: settings.ocrRecognitionLanguage || 'auto',
@@ -2461,13 +2644,14 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
         runAIPrompt();
     }
 
-    function hotkeyIsUsedByAnother(nextHotkey: string, field: 'flow' | 'ocr' | 'prompt' | 'tts') {
+    function hotkeyIsUsedByAnother(nextHotkey: string, field: 'flow' | 'pinShot' | 'ocr' | 'prompt' | 'tts') {
         if (!generalSettings || !aiSettings) {
             return false;
         }
         const candidate = normalizedHotkey(nextHotkey);
         const assigned = {
             flow: generalSettings.flowToggleHotkey,
+            pinShot: generalSettings.pinShotHotkey,
             ocr: generalSettings.ocrHotkey,
             prompt: aiSettings.hotkey,
             tts: aiSettings.ttsShortcut,
@@ -2550,6 +2734,31 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
         setError('');
         updateGeneralSettings({ ocrHotkey: nextHotkey });
         setRecordingOCRHotkey(false);
+    }
+
+    function capturePinShotHotkey(event: KeyboardEvent<HTMLButtonElement>) {
+        if (!recordingPinShotHotkey || !generalSettings) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (event.key === 'Escape') {
+            setRecordingPinShotHotkey(false);
+            return;
+        }
+
+        const nextHotkey = formatCapturedHotkey(event);
+        if (!nextHotkey) {
+            return;
+        }
+        if (hotkeyIsUsedByAnother(nextHotkey, 'pinShot')) {
+            setError(t('hotkeyAlreadyAssigned'));
+            return;
+        }
+        setError('');
+        updateGeneralSettings({ pinShotHotkey: nextHotkey });
+        setRecordingPinShotHotkey(false);
     }
 
     function captureTtsHotkey(event: KeyboardEvent<HTMLButtonElement>) {
@@ -3297,7 +3506,10 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                     <section className="settings-section">
                                         <div className="panel-header compact">
                                             <div>
-                                                <h2>{t('general')}</h2>
+                                                <h2 className="settings-section-title">
+                                                    <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">display_settings</span>
+                                                    {t('general')}
+                                                </h2>
                                                 <p>{t('generalDescription')}</p>
                                             </div>
                                         </div>
@@ -3384,11 +3596,63 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                         </div>
                                     </section>
                                 )}
+                                {generalSettings && (
+                                    <section className="settings-section pin-shot-settings">
+                                        <div className="panel-header compact">
+                                            <div>
+                                                <h2 className="settings-section-title">
+                                                    <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">pinboard</span>
+                                                    {t('pinShot')}
+                                                </h2>
+                                                <p>{t('pinShotSettingsDescription')}</p>
+                                            </div>
+                                        </div>
+                                        <div className="settings-form-grid">
+                                            <label className="checkbox-setting">
+                                                <span>{t('usePinShot')}</span>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={generalSettings.pinShotEnabled}
+                                                    disabled={settingsSaving}
+                                                    onChange={(event) => {
+                                                        setRecordingPinShotHotkey(false);
+                                                        updateGeneralSettings({
+                                                            pinShotEnabled: event.target.checked,
+                                                        });
+                                                    }}
+                                                />
+                                            </label>
+                                            <label>
+                                                {t('pinShotHotkey')}
+                                                <HotkeyCaptureControl
+                                                    value={generalSettings.pinShotHotkey}
+                                                    recording={recordingPinShotHotkey}
+                                                    disabled={!generalSettings.pinShotEnabled || settingsSaving}
+                                                    onStart={() => {
+                                                        setError("");
+                                                        setRecordingPinShotHotkey(true);
+                                                    }}
+                                                    onStop={() => setRecordingPinShotHotkey(false)}
+                                                    onKeyDown={capturePinShotHotkey}
+                                                    onClear={() => {
+                                                        setError("");
+                                                        setRecordingPinShotHotkey(false);
+                                                        updateGeneralSettings({ pinShotHotkey: "" });
+                                                    }}
+                                                    t={t}
+                                                />
+                                            </label>
+                                        </div>
+                                    </section>
+                                )}
                                 {isMacOS && generalSettings && (
                                     <section className="settings-section ocr-settings">
                                         <div className="panel-header compact">
                                             <div>
-                                                <h2>{t('ocr')}</h2>
+                                                <h2 className="settings-section-title">
+                                                    <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">document_scanner</span>
+                                                    {t('ocr')}
+                                                </h2>
                                                 <p>{t('ocrSettingsDescription')}</p>
                                             </div>
                                         </div>
@@ -3456,7 +3720,10 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                 <section className="settings-section ai-settings">
                                     <div className="panel-header compact">
                                         <div>
-                                            <h2>{t('aiAssistant')}</h2>
+                                            <h2 className="settings-section-title">
+                                                <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">smart_toy</span>
+                                                {t('aiAssistant')}
+                                            </h2>
                                             <p>{t('aiSettingsDescription')}</p>
                                         </div>
                                     </div>
@@ -3619,7 +3886,10 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                     {isMacOS && <>
                                         <hr className="settings-divider" />
                                         <div className="settings-section-header">
-                                            <h3>{t('appCompatibility')}</h3>
+                                            <h3 className="settings-section-title">
+                                                <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">flag_check</span>
+                                                {t('appCompatibility')}
+                                            </h3>
                                             <p>{t('appCompatibilityDescription')}</p>
                                         </div>
                                         <label className="wide-setting">
@@ -3644,7 +3914,10 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
 
                                     <div className="settings-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                         <div>
-                                            <h3>{t('ttsSettings')}</h3>
+                                            <h3 className="settings-section-title">
+                                                <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">text_to_speech</span>
+                                                {t('ttsSettings')}
+                                            </h3>
                                             <p>{t('ttsSettingsDescription')}</p>
                                         </div>
                                         <button

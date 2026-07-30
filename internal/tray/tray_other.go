@@ -5,10 +5,11 @@ package tray
 import "github.com/wailsapp/wails/v3/pkg/application"
 
 type Manager struct {
-	systemTray *application.SystemTray
-	toggleItem *application.MenuItem
-	activeIcon []byte
-	pausedIcon []byte
+	systemTray  *application.SystemTray
+	toggleItem  *application.MenuItem
+	pinShotItem *application.MenuItem
+	activeIcon  []byte
+	pausedIcon  []byte
 }
 
 func New(app *application.App, activeIcon []byte, pausedIcon []byte, actions Actions) *Manager {
@@ -19,6 +20,9 @@ func New(app *application.App, activeIcon []byte, pausedIcon []byte, actions Act
 	menu := app.NewMenu()
 	menu.Add("Ask AI").OnClick(func(*application.Context) {
 		call(actions.AskAI)
+	})
+	pinShotItem := menu.Add("Pin Shot").OnClick(func(*application.Context) {
+		call(actions.PinShot)
 	})
 	menu.Add("Main Window").OnClick(func(*application.Context) {
 		call(actions.ShowMainWindow)
@@ -34,10 +38,11 @@ func New(app *application.App, activeIcon []byte, pausedIcon []byte, actions Act
 	systemTray.SetMenu(menu)
 
 	return &Manager{
-		systemTray: systemTray,
-		toggleItem: toggleItem,
-		activeIcon: append([]byte(nil), activeIcon...),
-		pausedIcon: append([]byte(nil), pausedIcon...),
+		systemTray:  systemTray,
+		toggleItem:  toggleItem,
+		pinShotItem: pinShotItem,
+		activeIcon:  append([]byte(nil), activeIcon...),
+		pausedIcon:  append([]byte(nil), pausedIcon...),
 	}
 }
 
@@ -64,6 +69,11 @@ func (m *Manager) UpdateState(state State) {
 			m.toggleItem.SetLabel(label)
 		})
 	}
+	if m.pinShotItem != nil {
+		application.InvokeSync(func() {
+			m.pinShotItem.SetHidden(!state.PinShotEnabled)
+		})
+	}
 }
 
 func (m *Manager) Destroy() {
@@ -72,4 +82,5 @@ func (m *Manager) Destroy() {
 	}
 	m.systemTray = nil
 	m.toggleItem = nil
+	m.pinShotItem = nil
 }

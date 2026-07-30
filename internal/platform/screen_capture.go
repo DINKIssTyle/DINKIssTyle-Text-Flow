@@ -12,10 +12,13 @@ import (
 const maxScreenCaptureBytes = 20 * 1024 * 1024
 
 type ScreenCaptureRect struct {
-	X      int `json:"x"`
-	Y      int `json:"y"`
-	Width  int `json:"width"`
-	Height int `json:"height"`
+	DisplayID   string `json:"displayId,omitempty"`
+	X           int    `json:"x"`
+	Y           int    `json:"y"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	PixelWidth  int    `json:"pixelWidth,omitempty"`
+	PixelHeight int    `json:"pixelHeight,omitempty"`
 }
 
 type ScreenCaptureResult struct {

@@ -1,0 +1,24 @@
+//go:build !darwin
+
+package platform
+
+import "unsafe"
+
+func ConfigurePinShotWindow(unsafe.Pointer) {
+}
+
+func SetPinShotWindowBounds(unsafe.Pointer, int, int, int, int) bool {
+	return false
+}
+
+func ResolvePinShotSelection(
+	unsafe.Pointer,
+	float64,
+	float64,
+	float64,
+	float64,
+	float64,
+	float64,
+) (PinShotSelectionRect, bool) {
+	return PinShotSelectionRect{}, false
+}

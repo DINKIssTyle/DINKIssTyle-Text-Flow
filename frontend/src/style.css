@@ -5,7 +5,10 @@ html {
 
 html.capture-mode,
 html.capture-mode body,
-html.capture-mode #root {
+html.capture-mode #root,
+html.floating-capture-mode,
+html.floating-capture-mode body,
+html.floating-capture-mode #root {
     background: transparent;
     overflow: hidden;
 }

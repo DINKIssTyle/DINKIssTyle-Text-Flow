@@ -491,11 +491,11 @@ button:not(:disabled):focus-visible {
     cursor: crosshair;
     touch-action: none;
     user-select: none;
-    background: rgba(7, 12, 20, 0.28);
+    background: rgba(7, 12, 20, 0.18);
 }
 
 .screen-capture-overlay.is-selecting {
-    background: rgba(7, 12, 20, 0.42);
+    background: rgba(7, 12, 20, 0.26);
 }
 
 .screen-capture-hint,
@@ -556,6 +556,117 @@ button:not(:disabled):focus-visible {
     color: #fff;
     font-size: 11px;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.floating-capture-surface {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    background: transparent;
+    cursor: default;
+    --wails-draggable: drag;
+}
+
+.floating-capture-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: fill;
+    pointer-events: none;
+    transition: opacity 80ms linear;
+}
+
+.floating-capture-toolbar {
+    position: absolute;
+    z-index: 3;
+    top: 7px;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    border-radius: 8px;
+    background: rgba(16, 20, 27, 0.78);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.32);
+    opacity: 0;
+    transform: translate(-50%, -4px);
+    transition: opacity 120ms ease, transform 120ms ease;
+    pointer-events: none;
+    --wails-draggable: no-drag;
+}
+
+.floating-capture-surface:hover .floating-capture-toolbar,
+.floating-capture-toolbar:focus-within {
+    opacity: 1;
+    transform: translate(-50%, 0);
+    pointer-events: auto;
+}
+
+.floating-capture-toolbar button {
+    display: inline-grid;
+    width: 27px;
+    height: 27px;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #fff;
+    cursor: pointer;
+    --wails-draggable: no-drag;
+}
+
+.floating-capture-toolbar button:hover,
+.floating-capture-toolbar button:focus-visible {
+    border: 0;
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow: none;
+    outline: none;
+}
+
+.floating-capture-toolbar .material-symbols-rounded {
+    font-size: 18px;
+}
+
+.floating-capture-reset-label {
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: -0.03em;
+}
+
+.floating-capture-status,
+.floating-capture-error {
+    position: absolute;
+    z-index: 4;
+    left: 50%;
+    padding: 5px 9px;
+    border-radius: 6px;
+    background: rgba(16, 20, 27, 0.8);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 16px;
+    transform: translateX(-50%);
+    pointer-events: none;
+    --wails-draggable: no-drag;
+}
+
+.floating-capture-status {
+    bottom: 8px;
+}
+
+.floating-capture-error {
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 160, 160, 0.55);
+    background: rgba(118, 24, 24, 0.9);
+    text-align: center;
+    text-overflow: ellipsis;
+    transform: none;
     white-space: nowrap;
 }
 
@@ -2766,6 +2877,18 @@ h2 {
 
 .settings-section-header {
     margin-bottom: 12px;
+}
+
+.settings-section-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.settings-section-title .settings-section-icon {
+    flex: none;
+    color: var(--primary);
+    font-size: 19px;
 }
 
 .settings-section-header h3 {

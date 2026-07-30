@@ -49,6 +49,7 @@ func (m *Manager) UpdateState(state State) {
 		m.native,
 		C.int(boolInt(state.FlowPaused)),
 		C.int(boolInt(state.Running)),
+		C.int(boolInt(state.PinShotEnabled)),
 		C.int(boolInt(state.OCREnabled)),
 	)
 }
@@ -90,5 +91,7 @@ func dkstSystemTrayMenuSelected(itemID C.int) {
 		call(manager.actions.Quit)
 	case 5:
 		call(manager.actions.OCR)
+	case 6:
+		call(manager.actions.PinShot)
 	}
 }
