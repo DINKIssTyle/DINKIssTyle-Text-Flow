@@ -1,4 +1,4 @@
-//go:build darwin || windows || linux
+//go:build darwin || windows
 
 package ai
 
@@ -47,7 +47,7 @@ func TestExtractONNXRuntimeFromTarGz(t *testing.T) {
 	tempDir := t.TempDir()
 	archivePath := filepath.Join(tempDir, "runtime.tgz")
 	destPath := filepath.Join(tempDir, "libonnxruntime.so")
-	const contents = "linux-runtime"
+	const contents = "macos-runtime"
 
 	archive, err := os.Create(archivePath)
 	if err != nil {
@@ -57,7 +57,7 @@ func TestExtractONNXRuntimeFromTarGz(t *testing.T) {
 	tarWriter := tar.NewWriter(gzipWriter)
 	payload := []byte(contents)
 	if err := tarWriter.WriteHeader(&tar.Header{
-		Name: "onnxruntime-linux-x64-1.18.1/lib/libonnxruntime.so.1.18.1",
+		Name: "onnxruntime-osx-universal2-1.18.1/lib/libonnxruntime.dylib",
 		Mode: 0755,
 		Size: int64(len(payload)),
 	}); err != nil {
@@ -76,7 +76,7 @@ func TestExtractONNXRuntimeFromTarGz(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := extractONNXRuntimeFromTarGz(archivePath, destPath, "libonnxruntime.so"); err != nil {
+	if err := extractONNXRuntimeFromTarGz(archivePath, destPath, "libonnxruntime.dylib"); err != nil {
 		t.Fatal(err)
 	}
 	assertFileContents(t, destPath, contents)

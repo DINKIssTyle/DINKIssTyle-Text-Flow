@@ -1,4 +1,4 @@
-//go:build darwin || windows || linux
+//go:build darwin || windows
 
 package ai
 
@@ -293,14 +293,6 @@ func currentONNXRuntimeAsset() (onnxRuntimeAsset, error) {
 		archiveName = "onnxruntime-win-" + arch + "-" + onnxRuntimeVersion + ".zip"
 		libraryName = "onnxruntime.dll"
 		format = "zip"
-	case "linux":
-		arch, err := onnxRuntimeArchitecture("x64", "aarch64")
-		if err != nil {
-			return onnxRuntimeAsset{}, err
-		}
-		archiveName = "onnxruntime-linux-" + arch + "-" + onnxRuntimeVersion + ".tgz"
-		libraryName = "libonnxruntime.so"
-		format = "tgz"
 	default:
 		return onnxRuntimeAsset{}, fmt.Errorf("Supertonic is not supported on %s", runtime.GOOS)
 	}

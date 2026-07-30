@@ -20,14 +20,28 @@ var menuIcon []byte
 //go:embed build/menu_icon_paused.png
 var pausedMenuIcon []byte
 
+// Windows notification-area icons need to use more of the image canvas than
+// macOS menu-bar icons, otherwise Windows scales the visible glyph too small.
+//
+//go:embed build/menu_icon_windows.png
+var windowsMenuIcon []byte
+
+//go:embed build/menu_icon_paused_windows.png
+var windowsPausedMenuIcon []byte
+
 func main() {
+	if runtime.GOOS == "windows" {
+		menuIcon = windowsMenuIcon
+		pausedMenuIcon = windowsPausedMenuIcon
+	}
+
 	// Create an instance of the app structure
 	app := appservice.New(menuIcon, pausedMenuIcon)
 
 	// Create application with options
 	appInst := application.New(application.Options{
 		Name:        "DKST Text Flow",
-		Description: "Text expansion utility by DINKI'ssTyle.",
+		Description: "DKST Text Flow by DINKI'ssTyle",
 		Services: []application.Service{
 			application.NewService(app),
 		},

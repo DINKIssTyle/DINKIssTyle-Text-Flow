@@ -152,7 +152,7 @@ func TestNormalizeSettingsHandlesAppleIntelligenceProviderForPlatform(t *testing
 	}{
 		{goos: "darwin", want: ProviderAppleIntelligence},
 		{goos: "windows", want: ProviderOpenAI},
-		{goos: "linux", want: ProviderOpenAI},
+		{goos: "unsupported", want: ProviderOpenAI},
 	}
 
 	for _, test := range tests {

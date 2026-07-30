@@ -5,9 +5,9 @@ info:
   companyName: "DINKIssTyle"
   productName: "DKST Text Flow"
   productIdentifier: "com.dinkisstyle.textflow"
-  description: "Text expansion utility by DINKI'ssTyle."
+  description: "DKST Text Flow by DINKI'ssTyle"
   copyright: "(c) 2026, DINKIssTyle"
-  comments: "Text expansion utility by DINKI'ssTyle."
+  comments: "DKST Text Flow by DINKI'ssTyle"
   version: "1.0.0"
 
 # Dev mode configuration
