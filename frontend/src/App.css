@@ -582,20 +582,20 @@ button:not(:disabled):focus-visible {
 
 .ocr-hud .hud-result-content {
     max-height: 500px;
+    box-sizing: border-box;
+    padding-right: 30px;
     overflow: auto;
 }
 
-.ocr-hud .hud-result-content pre {
-    overflow: visible;
-}
-
 .ocr-hud-close {
-    float: right;
+    position: absolute;
+    z-index: 1;
+    top: 5px;
+    right: 5px;
     display: inline-grid;
     width: 24px;
     height: 24px;
     place-items: center;
-    margin: -3px -4px 4px 8px;
     padding: 0;
     border: 0;
     border-radius: 999px;

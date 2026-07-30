@@ -2633,16 +2633,16 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                     isOCRHUD ? (
                         <section className="ai-hud ocr-hud">
                             <div className="ai-result hud-result ocr-hud-result">
+                                <button
+                                    className="ocr-hud-close"
+                                    type="button"
+                                    onClick={() => hideCurrentWindow()}
+                                    aria-label={t('close')}
+                                    title={t('close')}
+                                >
+                                    <span className="material-symbols-rounded" aria-hidden="true">close</span>
+                                </button>
                                 <div className="hud-result-content">
-                                    <button
-                                        className="ocr-hud-close"
-                                        type="button"
-                                        onClick={() => hideCurrentWindow()}
-                                        aria-label={t('close')}
-                                        title={t('close')}
-                                    >
-                                        <span className="material-symbols-rounded" aria-hidden="true">close</span>
-                                    </button>
                                     <pre>{ocrText || error || t('ocrNoTextRecognized')}</pre>
                                 </div>
                                 <div className="hud-result-footer">
