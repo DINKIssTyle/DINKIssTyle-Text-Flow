@@ -1690,15 +1690,12 @@ h2 {
 }
 
 .settings-panel {
-    display: grid;
-    grid-template-rows: auto auto auto minmax(0, 1fr);
     width: 100%;
     max-width: none;
     box-sizing: border-box;
     height: 100%;
     min-height: 0;
-    overflow: hidden;
-    padding: 12px 16px;
+    overflow: auto;
 }
 
 .settings-list {
@@ -1708,102 +1705,34 @@ h2 {
 }
 
 .settings-list.platform-status-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 8px;
-}
-
-.settings-panel > .panel-header,
-.settings-panel > .platform-status-list,
-.settings-panel > .settings-category-tabs,
-.settings-panel > .settings-editor {
-    width: 100%;
-    max-width: 900px;
-    margin-right: auto;
-    margin-left: auto;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .settings-section {
     display: grid;
-    gap: 9px;
-    margin-top: 10px;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--panel-bg);
-    box-shadow: 0 1px 2px color-mix(in srgb, var(--modal-shadow) 22%, transparent);
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
 }
 
 .settings-editor {
-    display: grid;
-    grid-template-rows: minmax(0, 1fr) auto;
-    min-height: 0;
-}
-
-.settings-editor-content {
-    min-height: 0;
-    overflow: auto;
-    padding: 0 2px 10px;
-    scrollbar-gutter: stable;
-}
-
-.settings-category-tabs {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 3px;
-    margin-top: 10px;
-    padding: 3px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--subtle-bg);
-}
-
-.settings-category-tabs button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    min-width: 0;
-    height: 32px;
-    padding: 0 10px;
-    border: 0;
-    border-radius: 7px;
-    background: transparent;
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 600;
-    white-space: nowrap;
-}
-
-.settings-category-tabs button:hover {
-    border-color: transparent;
-    background: color-mix(in srgb, var(--active-bg) 72%, transparent);
-    color: var(--text);
-}
-
-.settings-category-tabs button.active {
-    background: var(--panel-bg);
-    color: var(--primary);
-    box-shadow: 0 1px 3px color-mix(in srgb, var(--modal-shadow) 32%, transparent);
-}
-
-.settings-category-tabs .material-symbols-rounded {
-    flex: none;
-    font-size: 17px;
+    display: block;
 }
 
 .settings-footer-actions {
-    position: relative;
+    position: sticky;
+    bottom: -10px;
     z-index: 2;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    margin: 0;
-    padding: 9px 2px 0;
+    margin: 16px -10px -10px;
+    padding: 12px 10px 10px;
     border-top: 1px solid var(--border);
-    background: var(--panel-bg);
+    background: color-mix(in srgb, var(--panel-bg) 94%, transparent);
+    backdrop-filter: blur(10px);
 }
 
 .settings-footer-actions button {
@@ -1956,13 +1885,11 @@ h2 {
     align-items: center;
     justify-content: space-between;
     min-width: 0;
-    flex: 0 1 auto;
-    min-height: 27px;
-    padding: 0 8px;
+    min-height: 38px;
+    padding: 0 10px;
     border: 1px solid var(--border);
-    border-radius: 999px;
-    gap: 6px;
-    background: var(--subtle-bg);
+    border-radius: 8px;
+    gap: 8px;
 }
 
 .settings-list > .settings-status-placeholder {
@@ -1979,7 +1906,7 @@ h2 {
 .settings-list .settings-role-icon {
     flex: 0 0 auto;
     color: var(--label);
-    font-size: 15px;
+    font-size: 19px;
     font-variation-settings: "FILL" 0, "wght" 500, "GRAD" 0, "opsz" 20;
 }
 
@@ -1995,7 +1922,7 @@ h2 {
 
 .settings-list .settings-state-icon {
     flex: 0 0 auto;
-    font-size: 17px;
+    font-size: 22px;
     font-variation-settings: "FILL" 1, "wght" 550, "GRAD" 0, "opsz" 24;
 }
 
@@ -2737,15 +2664,14 @@ h2 {
 .settings-form-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    column-gap: 14px;
-    row-gap: 8px;
+    gap: 10px;
 }
 
 .settings-form-grid label {
     display: grid;
-    grid-template-columns: 118px minmax(0, 1fr);
+    grid-template-columns: 136px minmax(0, 1fr);
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     color: var(--label);
     font-size: 13px;
 }
@@ -2865,9 +2791,9 @@ h2 {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: center;
-    min-height: 26px;
-    column-gap: 14px;
-    row-gap: 6px;
+    min-height: 28px;
+    column-gap: 18px;
+    row-gap: 8px;
 }
 
 .check-row label {
@@ -2882,8 +2808,8 @@ h2 {
 
 .ai-settings>.check-row {
     display: flex;
-    justify-content: flex-start;
-    gap: 22px;
+    justify-content: space-between;
+    gap: 18px;
 }
 
 .ai-settings>.check-row label {
@@ -2960,46 +2886,27 @@ h2 {
 .settings-divider {
     border: none;
     border-top: 1px solid var(--control-border);
-    margin: 10px 0;
+    margin: 16px 0;
 }
 
 .settings-section-header {
-    margin-bottom: 6px;
-}
-
-.settings-section-heading {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-}
-
-.settings-section-heading-copy {
-    display: grid;
-    gap: 3px;
-    min-width: 0;
+    margin-bottom: 12px;
 }
 
 .settings-section-title {
-    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
 }
 
-.settings-section-heading > .settings-section-icon {
+.settings-section-title .settings-section-icon {
     flex: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 38px;
-    height: 38px;
-    border-radius: 9px;
-    background: var(--primary);
-    color: #ffffff;
-    font-size: 20px;
-    line-height: 1;
+    color: var(--primary);
+    font-size: 19px;
 }
 
 .settings-section-header h3 {
-    margin: 0;
+    margin: 0 0 4px 0;
     font-size: 14px;
     font-weight: 600;
     color: var(--text);
