@@ -29,14 +29,20 @@ func (a *App) BeginScreenRegionCapture() error {
 }
 
 func (a *App) beginOCRScreenRegionCapture(sourceProcessID int) error {
+	if !a.tryBeginOCRProcessing() {
+		return errors.New("Apple Vision OCR is already processing")
+	}
 	settings, err := a.GetGeneralSettings()
 	if err != nil {
+		a.finishOCRProcessing()
 		return err
 	}
 	if !settings.AppleVisionOCREnabled {
+		a.finishOCRProcessing()
 		return errors.New("Apple Vision OCR is disabled")
 	}
 	if err := a.beginScreenRegionCapture(true, sourceProcessID); err != nil {
+		a.finishOCRProcessing()
 		a.showOCRWindow(OCRInvocation{
 			SourceProcessID: sourceProcessID,
 			Error:           err.Error(),
@@ -94,6 +100,7 @@ func (a *App) cancelScreenRegionCapture(restoreHUD bool) {
 		return
 	}
 	cancel := a.screenCaptureCancel
+	forOCR := a.screenCaptureForOCR
 	if !restoreHUD {
 		a.screenCaptureActive = false
 		a.screenCaptureCompleting = false
@@ -109,6 +116,9 @@ func (a *App) cancelScreenRegionCapture(restoreHUD bool) {
 	a.screenCaptureMu.Unlock()
 	if cancel != nil {
 		cancel()
+	}
+	if !restoreHUD && forOCR {
+		a.finishOCRProcessing()
 	}
 	if restoreHUD {
 		a.finishScreenRegionCapture(platform.ScreenCaptureResult{Canceled: true}, nil)
@@ -173,6 +183,7 @@ type OCRInvocation struct {
 	Text            string `json:"text"`
 	SourceProcessID int    `json:"sourceProcessId"`
 	Error           string `json:"error,omitempty"`
+	Loading         bool   `json:"loading,omitempty"`
 }
 
 func (a *App) finishOCRScreenRegionCapture(
@@ -180,6 +191,8 @@ func (a *App) finishOCRScreenRegionCapture(
 	captureErr error,
 	sourceProcessID int,
 ) {
+	defer a.finishOCRProcessing()
+
 	if result.Canceled {
 		if sourceProcessID > 0 {
 			_ = platform.ActivateProcess(sourceProcessID)
@@ -199,6 +212,10 @@ func (a *App) finishOCRScreenRegionCapture(
 		a.showOCRWindow(OCRInvocation{SourceProcessID: sourceProcessID, Error: err.Error()})
 		return
 	}
+	a.showOCRWindow(OCRInvocation{
+		SourceProcessID: sourceProcessID,
+		Loading:         true,
+	})
 	recognized, err := ocr.RecognizePNG(result.PNGData, settings.OCRRecognitionLanguage)
 	if err != nil {
 		a.showOCRWindow(OCRInvocation{SourceProcessID: sourceProcessID, Error: err.Error()})
@@ -217,6 +234,7 @@ func (a *App) finishOCRScreenRegionCapture(
 			a.showOCRWindow(OCRInvocation{SourceProcessID: sourceProcessID, Error: err.Error()})
 			return
 		}
+		hideOCRWindow()
 		if sourceProcessID > 0 {
 			_ = platform.ActivateProcess(sourceProcessID)
 		}
@@ -230,6 +248,22 @@ func (a *App) finishOCRScreenRegionCapture(
 	})
 }
 
+func (a *App) tryBeginOCRProcessing() bool {
+	a.ocrProcessingMu.Lock()
+	defer a.ocrProcessingMu.Unlock()
+	if a.ocrProcessing {
+		return false
+	}
+	a.ocrProcessing = true
+	return true
+}
+
+func (a *App) finishOCRProcessing() {
+	a.ocrProcessingMu.Lock()
+	a.ocrProcessing = false
+	a.ocrProcessingMu.Unlock()
+}
+
 func copyTextToClipboard(text string) error {
 	command := exec.Command("/usr/bin/pbcopy")
 	command.Stdin = strings.NewReader(text)
@@ -237,6 +271,18 @@ func copyTextToClipboard(text string) error {
 		return fmt.Errorf("failed to copy OCR text to the clipboard: %w", err)
 	}
 	return nil
+}
+
+func hideOCRWindow() {
+	appInst := application.Get()
+	if appInst == nil {
+		return
+	}
+	application.InvokeSync(func() {
+		if ocrWindow, ok := appInst.Window.GetByName("ocr"); ok {
+			ocrWindow.Hide()
+		}
+	})
 }
 
 func (a *App) showOCRWindow(invocation OCRInvocation) {

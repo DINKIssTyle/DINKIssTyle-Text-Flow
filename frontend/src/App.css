@@ -585,6 +585,22 @@ button:not(:disabled):focus-visible {
     overflow: auto;
 }
 
+.ocr-loading-status {
+    display: flex;
+    min-height: 62px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.ocr-loading-status .hud-tts-spinner {
+    width: 14px;
+    height: 14px;
+}
+
 .ocr-hud-close {
     position: absolute;
     z-index: 1;

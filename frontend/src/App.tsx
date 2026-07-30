@@ -683,6 +683,7 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
     const [aiTTSAudioReady, setAITTSAudioReady] = useState(false);
     const [aiTTSAudioAction, setAITTSAudioAction] = useState<'idle' | 'replaying' | 'saving' | 'saved'>('idle');
     const [ocrText, setOCRText] = useState('');
+    const [ocrLoading, setOCRLoading] = useState(false);
     const [ocrLanguages, setOCRLanguages] = useState<string[]>([]);
     const [recordingHotkey, setRecordingHotkey] = useState(false);
     const [recordingTtsHotkey, setRecordingTtsHotkey] = useState(false);
@@ -1099,13 +1100,14 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
             return;
         }
         const cancel = Events.On('ocr:result', (event) => {
-            const result = event.data as { text?: string; sourceProcessId?: number; error?: string };
+            const result = event.data as { text?: string; sourceProcessId?: number; error?: string; loading?: boolean };
             StopSpeaking().catch(() => {});
             resetAIHUDContent();
             setHasBeenInvoked(true);
             setWindowMode('hud');
             setActiveView('ai');
             setOCRText(result?.text || '');
+            setOCRLoading(result?.loading === true);
             setAIContext({
                 kind: 'none',
                 text: '',
@@ -1190,7 +1192,7 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
 
     useEffect(() => {
         resizeAIHUD();
-    }, [aiResult, aiReplacement, aiRunning, aiScreenshot, aiScreenshotCapturing, ocrText, windowMode, aiElapsedMs, aiTTSSynthesizing, aiTTSAudioReady]);
+    }, [aiResult, aiReplacement, aiRunning, aiScreenshot, aiScreenshotCapturing, ocrText, ocrLoading, windowMode, aiElapsedMs, aiTTSSynthesizing, aiTTSAudioReady]);
 
     useEffect(() => {
         return () => {
@@ -1499,6 +1501,7 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
         setAIResult('');
         setAIReplacement('');
         setOCRText('');
+        setOCRLoading(false);
         setAIScreenshot(null);
         setAIScreenshotCapturing(false);
         setAIElapsedMs(0);
@@ -2643,9 +2646,16 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                     <span className="material-symbols-rounded" aria-hidden="true">close</span>
                                 </button>
                                 <div className="hud-result-content">
-                                    <pre>{ocrText || error || t('ocrNoTextRecognized')}</pre>
+                                    {ocrLoading ? (
+                                        <div className="ocr-loading-status" role="status" aria-live="polite">
+                                            <span className="hud-tts-spinner" aria-hidden="true" />
+                                            <span>{t('ocrModelLoading')}</span>
+                                        </div>
+                                    ) : (
+                                        <pre>{ocrText || error || t('ocrNoTextRecognized')}</pre>
+                                    )}
                                 </div>
-                                <div className="hud-result-footer">
+                                {!ocrLoading && <div className="hud-result-footer">
                                     {aiTTSSynthesizing && (
                                         <div className="hud-tts-status" role="status" aria-live="polite">
                                             <span className="hud-tts-spinner" aria-hidden="true" />
@@ -2702,7 +2712,7 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                             </button>
                                         </div>
                                     )}
-                                </div>
+                                </div>}
                             </div>
                         </section>
                     ) : (

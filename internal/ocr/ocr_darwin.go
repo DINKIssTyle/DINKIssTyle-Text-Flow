@@ -4,7 +4,7 @@ package ocr
 
 /*
 #cgo darwin CFLAGS: -x objective-c -fblocks
-#cgo darwin LDFLAGS: -framework Foundation -framework Vision -framework ImageIO -framework CoreGraphics
+#cgo darwin LDFLAGS: -framework Foundation -framework Vision -framework ImageIO -framework CoreGraphics -framework CoreText
 
 #include <stdlib.h>
 
@@ -14,6 +14,7 @@ char *DKSTVisionRecognizeText(
 	const char *language,
 	char **errorMessage
 );
+int DKSTVisionWarmUp(const char *language, char **errorMessage);
 char *DKSTVisionSupportedLanguages(char **errorMessage);
 */
 import "C"
@@ -21,20 +22,23 @@ import "C"
 import (
 	"errors"
 	"strings"
+	"sync"
 	"unsafe"
 )
+
+var recognitionMu sync.Mutex
 
 func RecognizePNG(data []byte, language string) (Result, error) {
 	if len(data) == 0 {
 		return Result{}, errors.New("OCR image data is empty")
 	}
 
-	language = strings.TrimSpace(language)
-	if language == "" {
-		language = LanguageAutomatic
-	}
+	language = normalizeLanguage(language)
 	cLanguage := C.CString(language)
 	defer C.free(unsafe.Pointer(cLanguage))
+
+	recognitionMu.Lock()
+	defer recognitionMu.Unlock()
 
 	var cError *C.char
 	cText := C.DKSTVisionRecognizeText(
@@ -52,6 +56,31 @@ func RecognizePNG(data []byte, language string) (Result, error) {
 	}
 	defer C.free(unsafe.Pointer(cText))
 	return Result{Text: strings.TrimSpace(C.GoString(cText))}, nil
+}
+
+// WarmUp performs a real recognition request on a small in-memory text image.
+// It shares the recognition lock with user requests so Vision is never asked to
+// load or run more than one OCR model at a time.
+func WarmUp(language string) error {
+	cLanguage := C.CString(normalizeLanguage(language))
+	defer C.free(unsafe.Pointer(cLanguage))
+
+	recognitionMu.Lock()
+	defer recognitionMu.Unlock()
+
+	var cError *C.char
+	if C.DKSTVisionWarmUp(cLanguage, &cError) == 0 {
+		if cError != nil {
+			defer C.free(unsafe.Pointer(cError))
+			return errors.New(C.GoString(cError))
+		}
+		return errors.New("Apple Vision OCR warm-up failed")
+	}
+	if cError != nil {
+		defer C.free(unsafe.Pointer(cError))
+		return errors.New(C.GoString(cError))
+	}
+	return nil
 }
 
 func SupportedLanguages() ([]string, error) {
@@ -74,4 +103,12 @@ func SupportedLanguages() ([]string, error) {
 		}
 	}
 	return languages, nil
+}
+
+func normalizeLanguage(language string) string {
+	language = strings.TrimSpace(language)
+	if language == "" {
+		return LanguageAutomatic
+	}
+	return language
 }

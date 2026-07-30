@@ -117,6 +117,10 @@ type App struct {
 	screenCaptureWindows    []application.Window
 	screenCaptureForOCR     bool
 	screenCaptureSourcePID  int
+	ocrProcessingMu         sync.Mutex
+	ocrProcessing           bool
+	ocrWarmupMu             sync.Mutex
+	ocrWarmupGeneration     uint64
 	flowPaused              bool
 	flowStatusStopper       context.CancelFunc
 	trayManager             *tray.Manager
@@ -158,6 +162,9 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 	a.configureGlobalShortcuts()
 	a.reconcileFlowStatus(true)
 	a.startFlowStatusMonitor()
+	if settings, settingsErr := a.GetGeneralSettings(); settingsErr == nil && settings.AppleVisionOCREnabled {
+		a.scheduleOCRWarmUp(settings.OCRRecognitionLanguage)
+	}
 
 	return nil
 }
@@ -470,6 +477,10 @@ func (a *App) SaveGeneralSettings(settings GeneralSettings) (GeneralSettings, er
 		return GeneralSettings{}, errors.New("storage is not ready")
 	}
 
+	previous, err := a.GetGeneralSettings()
+	if err != nil {
+		return GeneralSettings{}, err
+	}
 	normalized := NormalizeGeneralSettings(settings)
 	aiSettings, err := a.GetAISettings()
 	if err != nil {
@@ -489,6 +500,9 @@ func (a *App) SaveGeneralSettings(settings GeneralSettings) (GeneralSettings, er
 	if appInst := application.Get(); appInst != nil {
 		appInst.Event.Emit("general:settings-updated", normalized)
 	}
+	if shouldWarmUpOCR(previous, normalized) {
+		a.scheduleOCRWarmUp(normalized.OCRRecognitionLanguage)
+	}
 	return normalized, nil
 }
 
@@ -500,6 +514,10 @@ func (a *App) SaveApplicationSettings(general GeneralSettings, settings ai.Setti
 		return ApplicationSettings{}, errors.New("storage is not ready")
 	}
 
+	previousGeneral, err := a.GetGeneralSettings()
+	if err != nil {
+		return ApplicationSettings{}, err
+	}
 	normalizedGeneral := NormalizeGeneralSettings(general)
 	normalizedAI := a.normalizeAISettings(settings)
 	if err := validateUniqueHotkeys(normalizedGeneral, normalizedAI); err != nil {
@@ -513,7 +531,7 @@ func (a *App) SaveApplicationSettings(general GeneralSettings, settings ai.Setti
 	}
 
 	a.aiSettingsMu.Lock()
-	err := a.store.SetJSONSetting(aiSettingsKey, normalizedAI)
+	err = a.store.SetJSONSetting(aiSettingsKey, normalizedAI)
 	a.aiSettingsMu.Unlock()
 	if err != nil {
 		return ApplicationSettings{}, err
@@ -524,6 +542,9 @@ func (a *App) SaveApplicationSettings(general GeneralSettings, settings ai.Setti
 	if appInst := application.Get(); appInst != nil {
 		appInst.Event.Emit("general:settings-updated", normalizedGeneral)
 		appInst.Event.Emit("ai:settings-updated", normalizedAI)
+	}
+	if shouldWarmUpOCR(previousGeneral, normalizedGeneral) {
+		a.scheduleOCRWarmUp(normalizedGeneral.OCRRecognitionLanguage)
 	}
 	return ApplicationSettings{General: normalizedGeneral, AI: normalizedAI}, nil
 }
