@@ -12,6 +12,7 @@ type Actions struct {
 type State struct {
 	FlowPaused     bool
 	Running        bool
+	AIEnabled      bool
 	PinShotEnabled bool
 	OCREnabled     bool
 }

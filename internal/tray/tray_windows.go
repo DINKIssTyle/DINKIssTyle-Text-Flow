@@ -7,6 +7,7 @@ import "github.com/wailsapp/wails/v3/pkg/application"
 type Manager struct {
 	systemTray  *application.SystemTray
 	toggleItem  *application.MenuItem
+	askAIItem   *application.MenuItem
 	pinShotItem *application.MenuItem
 	activeIcon  []byte
 	pausedIcon  []byte
@@ -18,12 +19,14 @@ func New(app *application.App, activeIcon []byte, pausedIcon []byte, actions Act
 	systemTray.SetTooltip("DKST Text Flow")
 
 	menu := app.NewMenu()
-	menu.Add("Ask AI").OnClick(func(*application.Context) {
+	askAIItem := menu.Add("Ask AI").OnClick(func(*application.Context) {
 		call(actions.AskAI)
 	})
+	askAIItem.SetHidden(true)
 	pinShotItem := menu.Add("Pin Shot").OnClick(func(*application.Context) {
 		call(actions.PinShot)
 	})
+	pinShotItem.SetHidden(true)
 	menu.Add("Main Window").OnClick(func(*application.Context) {
 		call(actions.ShowMainWindow)
 	})
@@ -40,6 +43,7 @@ func New(app *application.App, activeIcon []byte, pausedIcon []byte, actions Act
 	return &Manager{
 		systemTray:  systemTray,
 		toggleItem:  toggleItem,
+		askAIItem:   askAIItem,
 		pinShotItem: pinShotItem,
 		activeIcon:  append([]byte(nil), activeIcon...),
 		pausedIcon:  append([]byte(nil), pausedIcon...),
@@ -60,20 +64,22 @@ func (m *Manager) UpdateState(state State) {
 		m.systemTray.SetIcon(icon)
 	}
 	m.systemTray.SetTooltip(tooltip)
-	if m.toggleItem != nil {
+	application.InvokeSync(func() {
+		if m.askAIItem != nil {
+			m.askAIItem.SetHidden(!state.AIEnabled)
+		}
+		if m.pinShotItem != nil {
+			m.pinShotItem.SetHidden(!state.PinShotEnabled)
+		}
+		if m.toggleItem == nil {
+			return
+		}
 		label := "Pause Flow"
 		if state.FlowPaused {
 			label = "Resume Flow"
 		}
-		application.InvokeSync(func() {
-			m.toggleItem.SetLabel(label)
-		})
-	}
-	if m.pinShotItem != nil {
-		application.InvokeSync(func() {
-			m.pinShotItem.SetHidden(!state.PinShotEnabled)
-		})
-	}
+		m.toggleItem.SetLabel(label)
+	})
 }
 
 func (m *Manager) Destroy() {
@@ -82,5 +88,6 @@ func (m *Manager) Destroy() {
 	}
 	m.systemTray = nil
 	m.toggleItem = nil
+	m.askAIItem = nil
 	m.pinShotItem = nil
 }

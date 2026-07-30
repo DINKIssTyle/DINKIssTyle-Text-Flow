@@ -397,15 +397,20 @@ func (a *App) reconcileFlowStatus(emit bool) platform.Status {
 	a.flowLifecycleMu.Unlock()
 
 	if a.trayManager != nil {
+		aiEnabled := false
 		ocrEnabled := false
 		pinShotEnabled := false
 		if settings, err := a.GetGeneralSettings(); err == nil {
 			ocrEnabled = settings.AppleVisionOCREnabled
 			pinShotEnabled = settings.PinShotEnabled
 		}
+		if settings, err := a.GetAISettings(); err == nil {
+			aiEnabled = settings.Enabled
+		}
 		a.trayManager.UpdateState(tray.State{
 			FlowPaused:     paused,
 			Running:        status.FlowEngineRunning,
+			AIEnabled:      aiEnabled,
 			PinShotEnabled: pinShotEnabled,
 			OCREnabled:     ocrEnabled,
 		})
@@ -766,6 +771,7 @@ func (a *App) SaveAISettings(settings ai.Settings) (ai.Settings, error) {
 	a.aiSettingsMu.Unlock()
 
 	a.configureGlobalShortcuts()
+	a.reconcileFlowStatus(false)
 	if appInst := application.Get(); appInst != nil {
 		appInst.Event.Emit("ai:settings-updated", normalized)
 	}
@@ -930,7 +936,7 @@ func (a *App) ShowMainWindow() {
 func (a *App) configureSystemTray(appInst *application.App) {
 	a.trayManager = tray.New(appInst, a.menuIcon, a.pausedMenuIcon, tray.Actions{
 		AskAI: func() {
-			go a.showAIPrompt(platform.GetFrontmostPID(), false)
+			go a.showAIPrompt(platform.GetFrontmostPID(), true)
 		},
 		OCR: func() {
 			go a.beginOCRScreenRegionCapture(platform.GetFrontmostPID())

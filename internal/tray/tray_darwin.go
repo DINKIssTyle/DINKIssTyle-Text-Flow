@@ -49,6 +49,7 @@ func (m *Manager) UpdateState(state State) {
 		m.native,
 		C.int(boolInt(state.FlowPaused)),
 		C.int(boolInt(state.Running)),
+		C.int(boolInt(state.AIEnabled)),
 		C.int(boolInt(state.PinShotEnabled)),
 		C.int(boolInt(state.OCREnabled)),
 	)

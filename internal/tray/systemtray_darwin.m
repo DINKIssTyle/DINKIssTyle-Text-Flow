@@ -9,6 +9,7 @@ extern void dkstSystemTrayMenuSelected(int itemID);
 @property(nonatomic, retain) NSStatusItem *statusItem;
 @property(nonatomic, retain) NSMenu *menu;
 @property(nonatomic, retain) NSMenuItem *flowToggleItem;
+@property(nonatomic, retain) NSMenuItem *askAIItem;
 @property(nonatomic, retain) NSMenuItem *ocrItem;
 @property(nonatomic, retain) NSMenuItem *pinShotItem;
 @property(nonatomic, retain) NSImage *activeImage;
@@ -17,6 +18,7 @@ extern void dkstSystemTrayMenuSelected(int itemID);
 - (void)menuItemSelected:(id)sender;
 - (void)updateFlowPaused:(BOOL)flowPaused
                  running:(BOOL)running
+               aiEnabled:(BOOL)aiEnabled
           pinShotEnabled:(BOOL)pinShotEnabled
               ocrEnabled:(BOOL)ocrEnabled;
 @end
@@ -36,6 +38,7 @@ extern void dkstSystemTrayMenuSelected(int itemID);
 
 - (void)updateFlowPaused:(BOOL)flowPaused
                  running:(BOOL)running
+               aiEnabled:(BOOL)aiEnabled
           pinShotEnabled:(BOOL)pinShotEnabled
               ocrEnabled:(BOOL)ocrEnabled {
   NSImage *image = running ? self.activeImage : self.pausedImage;
@@ -45,6 +48,7 @@ extern void dkstSystemTrayMenuSelected(int itemID);
   self.statusItem.button.toolTip =
       running ? @"DKST Text Flow" : @"DKST Text Flow — Paused";
   self.flowToggleItem.title = flowPaused ? @"Resume Flow" : @"Pause Flow";
+  self.askAIItem.hidden = !aiEnabled;
   self.pinShotItem.hidden = !pinShotEnabled;
   self.ocrItem.hidden = !ocrEnabled;
 }
@@ -53,6 +57,7 @@ extern void dkstSystemTrayMenuSelected(int itemID);
   [_pausedImage release];
   [_activeImage release];
   [_flowToggleItem release];
+  [_askAIItem release];
   [_ocrItem release];
   [_pinShotItem release];
   [_menu release];
@@ -103,11 +108,14 @@ void *dkstSystemTrayCreate(const unsigned char *activeIconBytes,
 
   controller.menu =
       [[[NSMenu alloc] initWithTitle:@"DKST Text Flow"] autorelease];
-  [controller.menu addItem:DKSTMenuItem(@"Ask AI", 1, controller)];
+  controller.askAIItem = DKSTMenuItem(@"Ask AI", 1, controller);
+  controller.askAIItem.hidden = YES;
+  [controller.menu addItem:controller.askAIItem];
   controller.ocrItem = DKSTMenuItem(@"OCR", 5, controller);
   controller.ocrItem.hidden = YES;
   [controller.menu addItem:controller.ocrItem];
   controller.pinShotItem = DKSTMenuItem(@"Pin Shot", 6, controller);
+  controller.pinShotItem.hidden = YES;
   [controller.menu addItem:controller.pinShotItem];
   [controller.menu addItem:DKSTMenuItem(@"Main Window", 2, controller)];
   [controller.menu addItem:[NSMenuItem separatorItem]];
@@ -120,13 +128,15 @@ void *dkstSystemTrayCreate(const unsigned char *activeIconBytes,
 }
 
 void dkstSystemTrayUpdateState(void *tray, int flowPaused, int running,
-                               int pinShotEnabled, int ocrEnabled) {
+                               int aiEnabled, int pinShotEnabled,
+                               int ocrEnabled) {
   DKSTSystemTrayController *controller = (DKSTSystemTrayController *)tray;
   if (controller == nil)
     return;
   dispatch_async(dispatch_get_main_queue(), ^{
     [controller updateFlowPaused:(flowPaused == 1)
                          running:(running == 1)
+                       aiEnabled:(aiEnabled == 1)
                   pinShotEnabled:(pinShotEnabled == 1)
                       ocrEnabled:(ocrEnabled == 1)];
   });
