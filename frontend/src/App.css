@@ -582,8 +582,6 @@ button:not(:disabled):focus-visible {
 
 .ocr-hud .hud-result-content {
     max-height: 500px;
-    box-sizing: border-box;
-    padding-right: 30px;
     overflow: auto;
 }
 
