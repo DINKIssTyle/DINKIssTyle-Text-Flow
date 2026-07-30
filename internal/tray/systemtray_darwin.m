@@ -9,11 +9,14 @@ extern void dkstSystemTrayMenuSelected(int itemID);
 @property(nonatomic, retain) NSStatusItem *statusItem;
 @property(nonatomic, retain) NSMenu *menu;
 @property(nonatomic, retain) NSMenuItem *flowToggleItem;
+@property(nonatomic, retain) NSMenuItem *ocrItem;
 @property(nonatomic, retain) NSImage *activeImage;
 @property(nonatomic, retain) NSImage *pausedImage;
 - (void)statusItemClicked:(id)sender;
 - (void)menuItemSelected:(id)sender;
-- (void)updateFlowPaused:(BOOL)flowPaused running:(BOOL)running;
+- (void)updateFlowPaused:(BOOL)flowPaused
+                 running:(BOOL)running
+              ocrEnabled:(BOOL)ocrEnabled;
 @end
 
 @implementation DKSTSystemTrayController
@@ -29,7 +32,9 @@ extern void dkstSystemTrayMenuSelected(int itemID);
   dkstSystemTrayMenuSelected((int)sender.tag);
 }
 
-- (void)updateFlowPaused:(BOOL)flowPaused running:(BOOL)running {
+- (void)updateFlowPaused:(BOOL)flowPaused
+                 running:(BOOL)running
+              ocrEnabled:(BOOL)ocrEnabled {
   NSImage *image = running ? self.activeImage : self.pausedImage;
   if (image == nil)
     image = self.activeImage;
@@ -37,12 +42,14 @@ extern void dkstSystemTrayMenuSelected(int itemID);
   self.statusItem.button.toolTip =
       running ? @"DKST Text Flow" : @"DKST Text Flow — Paused";
   self.flowToggleItem.title = flowPaused ? @"Resume Flow" : @"Pause Flow";
+  self.ocrItem.hidden = !ocrEnabled;
 }
 
 - (void)dealloc {
   [_pausedImage release];
   [_activeImage release];
   [_flowToggleItem release];
+  [_ocrItem release];
   [_menu release];
   [_statusItem release];
   [super dealloc];
@@ -92,6 +99,9 @@ void *dkstSystemTrayCreate(const unsigned char *activeIconBytes,
   controller.menu =
       [[[NSMenu alloc] initWithTitle:@"DKST Text Flow"] autorelease];
   [controller.menu addItem:DKSTMenuItem(@"Ask AI", 1, controller)];
+  controller.ocrItem = DKSTMenuItem(@"OCR", 5, controller);
+  controller.ocrItem.hidden = YES;
+  [controller.menu addItem:controller.ocrItem];
   [controller.menu addItem:DKSTMenuItem(@"Main Window", 2, controller)];
   [controller.menu addItem:[NSMenuItem separatorItem]];
   controller.flowToggleItem = DKSTMenuItem(@"Pause Flow", 3, controller);
@@ -102,12 +112,15 @@ void *dkstSystemTrayCreate(const unsigned char *activeIconBytes,
   return controller;
 }
 
-void dkstSystemTrayUpdateState(void *tray, int flowPaused, int running) {
+void dkstSystemTrayUpdateState(void *tray, int flowPaused, int running,
+                               int ocrEnabled) {
   DKSTSystemTrayController *controller = (DKSTSystemTrayController *)tray;
   if (controller == nil)
     return;
   dispatch_async(dispatch_get_main_queue(), ^{
-    [controller updateFlowPaused:(flowPaused == 1) running:(running == 1)];
+    [controller updateFlowPaused:(flowPaused == 1)
+                         running:(running == 1)
+                      ocrEnabled:(ocrEnabled == 1)];
   });
 }
 

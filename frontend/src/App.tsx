@@ -27,9 +27,12 @@ import {
     GetAIPromptSettings,
     GetDashboard,
     GetGeneralSettings,
+    GetExternalFrontmostProcessID,
+    GetOCRLanguages,
     GetPlatformStatus,
     GetTTSModelStatus,
     ImportSnippetsAndAIPrompts,
+    InsertOCRTextAtCursor,
     IsFocusedElementEditable,
     ListOSVoices,
     StartTTSModelDownload,
@@ -42,6 +45,7 @@ import {
     ReplayLastTTSAudio,
     ReplaceSelectedText,
     ResizeAIPromptWindow,
+    ResizeOCRWindow,
     RunAIAssist,
     SaveLastTTSAudio,
     SaveApplicationSettings,
@@ -267,7 +271,7 @@ function normalizedHotkey(value: string) {
 }
 
 function hasDuplicateHotkeys(general: GeneralSettings, settings: AISettings) {
-    const values = [general.flowToggleHotkey, settings.hotkey, settings.ttsShortcut]
+    const values = [general.flowToggleHotkey, general.ocrHotkey, settings.hotkey, settings.ttsShortcut]
         .map((value) => normalizedHotkey(value || ''))
         .filter(Boolean);
     return new Set(values).size !== values.length;
@@ -600,10 +604,14 @@ function App() {
     if (mode === 'capture') {
         return <ScreenCaptureOverlay screenID={params.get('screenId') || ''} />;
     }
-    return <MainApp isHUD={mode === 'hud'} />;
+    const hudMode = mode === 'ocr' ? 'ocr' : (mode === 'hud' ? 'ai' : null);
+    return <MainApp hudMode={hudMode} />;
 }
 
-function MainApp({ isHUD }: { isHUD: boolean }) {
+function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
+    const isHUD = hudMode !== null;
+    const isAIHUD = hudMode === 'ai';
+    const isOCRHUD = hudMode === 'ocr';
     const [activeView, setActiveView] = useState<'snippets' | 'dashboard' | 'aiPrompts' | 'ai' | 'settings' | 'about'>(isHUD ? 'ai' : 'snippets');
     const [windowMode, setWindowMode] = useState<'main' | 'hud'>(isHUD ? 'hud' : 'main');
     const [snippets, setSnippets] = useState<Snippet[]>([]);
@@ -674,9 +682,12 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
     const [aiTTSSynthesizing, setAITTSSynthesizing] = useState(false);
     const [aiTTSAudioReady, setAITTSAudioReady] = useState(false);
     const [aiTTSAudioAction, setAITTSAudioAction] = useState<'idle' | 'replaying' | 'saving' | 'saved'>('idle');
+    const [ocrText, setOCRText] = useState('');
+    const [ocrLanguages, setOCRLanguages] = useState<string[]>([]);
     const [recordingHotkey, setRecordingHotkey] = useState(false);
     const [recordingTtsHotkey, setRecordingTtsHotkey] = useState(false);
     const [recordingFlowToggleHotkey, setRecordingFlowToggleHotkey] = useState(false);
+    const [recordingOCRHotkey, setRecordingOCRHotkey] = useState(false);
     const [hasBeenInvoked, setHasBeenInvoked] = useState(false);
     const [aiContext, setAIContext] = useState<AIInvocationContext>({
         kind: 'none',
@@ -722,6 +733,26 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
 
     const language = (generalSettings?.language ?? 'en') as Language;
     const t = useMemo(() => createTranslator(language), [language]);
+    const ocrLanguageOptions = useMemo(() => {
+        const current = generalSettings?.ocrRecognitionLanguage || 'auto';
+        const preferred = ['en-US', 'ko-KR', 'zh-Hans', 'zh-Hant', 'ja-JP'];
+        const available = Array.from(new Set([
+            ...preferred.filter((code) => ocrLanguages.includes(code)),
+            ...ocrLanguages,
+            ...(current !== 'auto' ? [current] : []),
+        ]));
+        const displayNames = new Intl.DisplayNames(
+            [language === 'ko' ? 'ko-KR' : 'en-US'],
+            { type: 'language' },
+        );
+        return [
+            { value: 'auto', label: t('auto') },
+            ...available.map((code) => ({
+                value: code,
+                label: displayNames.of(code) || code,
+            })),
+        ];
+    }, [generalSettings?.ocrRecognitionLanguage, language, ocrLanguages, t]);
 
     useEffect(() => {
         if (!saveToast) {
@@ -837,6 +868,11 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             setAISettings(normalized);
         }).catch((err) => setError(String(err)));
         GetAIPromptSettings().then((settings) => setAIPromptSettings(normalizeAIPromptSettings(settings))).catch((err) => setError(String(err)));
+        if (isMacOS && !isHUD) {
+            GetOCRLanguages()
+                .then((languages) => setOCRLanguages(Array.isArray(languages) ? languages : []))
+                .catch((err) => setError(String(err)));
+        }
     }, []);
 
     useEffect(() => {
@@ -985,7 +1021,7 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
     }, [aiRunning, windowMode]);
 
     useEffect(() => {
-        if (!isHUD) {
+        if (!isAIHUD) {
             return;
         }
         const cancel = Events.On('ai:invoke', (event) => {
@@ -1015,10 +1051,10 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             }, 0);
         });
         return cancel;
-    }, []);
+    }, [isAIHUD]);
 
     useEffect(() => {
-        if (!isHUD) {
+        if (!isAIHUD) {
             return;
         }
         const focusAfterCapture = () => {
@@ -1056,7 +1092,59 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             cancelCanceled();
             cancelError();
         };
-    }, [isHUD, t]);
+    }, [isAIHUD, t]);
+
+    useEffect(() => {
+        if (!isOCRHUD) {
+            return;
+        }
+        const cancel = Events.On('ocr:result', (event) => {
+            const result = event.data as { text?: string; sourceProcessId?: number; error?: string };
+            StopSpeaking().catch(() => {});
+            resetAIHUDContent();
+            setHasBeenInvoked(true);
+            setWindowMode('hud');
+            setActiveView('ai');
+            setOCRText(result?.text || '');
+            setAIContext({
+                kind: 'none',
+                text: '',
+                filePath: '',
+                label: 'OCR',
+                sourceProcessId: result?.sourceProcessId || 0,
+                appName: '',
+                appBundleId: '',
+                isEditable: true,
+            });
+            setError(result?.error ? localizedOCRError(result.error) : '');
+            if (result?.text) {
+                speakHUDText(result.text, aiSettingsRef.current);
+            }
+            window.requestAnimationFrame(resizeAIHUD);
+        });
+        return cancel;
+    }, [isOCRHUD, t]);
+
+    useEffect(() => {
+        if (!isOCRHUD) {
+            return;
+        }
+        const cancel = Events.On('common:WindowLostFocus', () => {
+            window.setTimeout(() => {
+                GetExternalFrontmostProcessID()
+                    .then((processID) => {
+                        if (processID > 0) {
+                            setAIContext((current) => ({
+                                ...current,
+                                sourceProcessId: processID,
+                            }));
+                        }
+                    })
+                    .catch(() => {});
+            }, 80);
+        });
+        return cancel;
+    }, [isOCRHUD]);
 
     useEffect(() => {
         if (!isHUD) {
@@ -1086,13 +1174,23 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
     }, []);
 
     useEffect(() => {
+        if (isHUD) {
+            return;
+        }
+        const cancel = Events.On('ocr:copied', () => {
+            playCompletionSound();
+        });
+        return cancel;
+    }, [isHUD]);
+
+    useEffect(() => {
         resizeAIPrompt();
         resizeAIHUD();
     }, [aiPrompt, windowMode]);
 
     useEffect(() => {
         resizeAIHUD();
-    }, [aiResult, aiReplacement, aiRunning, aiScreenshot, aiScreenshotCapturing, windowMode, aiElapsedMs, aiTTSSynthesizing, aiTTSAudioReady]);
+    }, [aiResult, aiReplacement, aiRunning, aiScreenshot, aiScreenshotCapturing, ocrText, windowMode, aiElapsedMs, aiTTSSynthesizing, aiTTSAudioReady]);
 
     useEffect(() => {
         return () => {
@@ -1400,6 +1498,7 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         setAIPrompt('');
         setAIResult('');
         setAIReplacement('');
+        setOCRText('');
         setAIScreenshot(null);
         setAIScreenshotCapturing(false);
         setAIElapsedMs(0);
@@ -1437,7 +1536,18 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         await Window.Hide();
     }
 
-    function normalizeGeneralSettings(settings: { themeMode?: string; language?: string; typingTrendEnabled?: boolean; startAtLogin?: boolean; soundName?: string; flowToggleHotkey?: string } = {}): GeneralSettings {
+    function normalizeGeneralSettings(settings: {
+        themeMode?: string;
+        language?: string;
+        typingTrendEnabled?: boolean;
+        startAtLogin?: boolean;
+        soundName?: string;
+        flowToggleHotkey?: string;
+        appleVisionOcrEnabled?: boolean;
+        ocrHotkey?: string;
+        ocrRecognitionLanguage?: string;
+        ocrResultAction?: string;
+    } = {}): GeneralSettings {
         const themeMode = settings.themeMode === 'light' || settings.themeMode === 'dark' ? settings.themeMode : 'auto';
         const soundName = resolveSoundName(settings.soundName);
         return {
@@ -1447,6 +1557,10 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             startAtLogin: settings.startAtLogin === true,
             soundName,
             flowToggleHotkey: settings.flowToggleHotkey || '',
+            appleVisionOcrEnabled: settings.appleVisionOcrEnabled === true,
+            ocrHotkey: settings.ocrHotkey || '',
+            ocrRecognitionLanguage: settings.ocrRecognitionLanguage || 'auto',
+            ocrResultAction: settings.ocrResultAction === 'clipboard' ? 'clipboard' : 'show',
         };
     }
 
@@ -2002,7 +2116,8 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             aiHUDHeightRef.current = nextHeight;
             const growUp = aiHUDGrowUpRef.current;
             aiHUDGrowUpRef.current = false;
-            ResizeAIPromptWindow(nextHeight, growUp).catch((err) => setError(String(err)));
+            const resize = isOCRHUD ? ResizeOCRWindow : ResizeAIPromptWindow;
+            resize(nextHeight, growUp).catch((err) => setError(String(err)));
         });
     }
 
@@ -2047,7 +2162,46 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
     }
 
     function aiResponseText() {
-        return aiReplacement || aiResult;
+        return isOCRHUD ? ocrText : (aiReplacement || aiResult);
+    }
+
+    function localizedOCRError(err: unknown) {
+        const message = String(err || '').replace(/^RuntimeError:\s*/i, '').trim();
+        if (message.toLowerCase().includes('did not recognize any text')) {
+            return t('ocrNoTextRecognized');
+        }
+        if (message.toLowerCase().includes('does not support')) {
+            return t('ocrLanguageUnsupported');
+        }
+        return message || t('ocrRecognitionFailed');
+    }
+
+    function speakHUDText(text: string, settings: AISettings | null) {
+        if (!text || !settings?.ttsEnabled || !settings?.ttsUseAiResponse) {
+            return;
+        }
+        const ttsGeneration = aiTTSGenerationRef.current + 1;
+        aiTTSGenerationRef.current = ttsGeneration;
+        setAITTSSynthesizing(true);
+        Speak(text)
+            .then(() => {
+                if (
+                    ttsGeneration === aiTTSGenerationRef.current &&
+                    settings.ttsEngine === 'supertonic3'
+                ) {
+                    setAITTSAudioReady(true);
+                }
+            })
+            .catch((err) => {
+                if (ttsGeneration === aiTTSGenerationRef.current) {
+                    setError(String(err));
+                }
+            })
+            .finally(() => {
+                if (ttsGeneration === aiTTSGenerationRef.current) {
+                    setAITTSSynthesizing(false);
+                }
+            });
     }
 
     function localizedAIError(err: unknown, fallback?: string) {
@@ -2085,6 +2239,32 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             await hideCurrentWindow(false);
             await waits(80);
             await ReplaceSelectedText(sourceProcessID, response);
+            playCompletionSound();
+        } catch (err) {
+            setAIResponseAction('idle');
+            setError(String(err));
+        } finally {
+            aiInsertionInFlightRef.current = false;
+        }
+    }
+
+    async function insertOCRText() {
+        const response = ocrText;
+        const targetProcessID = aiContext.sourceProcessId;
+        if (
+            !response ||
+            targetProcessID <= 0 ||
+            aiResponseAction === 'inserting' ||
+            aiInsertionInFlightRef.current
+        ) {
+            return;
+        }
+        aiInsertionInFlightRef.current = true;
+        setAIResponseAction('inserting');
+        try {
+            await hideCurrentWindow(false);
+            await waits(100);
+            await InsertOCRTextAtCursor(targetProcessID, response);
             playCompletionSound();
         } catch (err) {
             setAIResponseAction('idle');
@@ -2247,35 +2427,8 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
             setAIResult(isEdit ? '' : (result.supportReport || ''));
             setAIReplacement(isEdit ? result.replacement : '');
 
-            // Speak if enabled
-            // @ts-ignore
-            if (requestSettings?.ttsEnabled && requestSettings?.ttsUseAiResponse) {
-                const textToSpeak = isEdit ? result.replacement : (result.supportReport || '');
-                if (textToSpeak) {
-                    const ttsGeneration = aiTTSGenerationRef.current + 1;
-                    aiTTSGenerationRef.current = ttsGeneration;
-                    setAITTSSynthesizing(true);
-                    Speak(textToSpeak)
-                        .then(() => {
-                            if (
-                                ttsGeneration === aiTTSGenerationRef.current &&
-                                requestSettings?.ttsEngine === 'supertonic3'
-                            ) {
-                                setAITTSAudioReady(true);
-                            }
-                        })
-                        .catch((err) => {
-                            if (ttsGeneration === aiTTSGenerationRef.current) {
-                                setError(String(err));
-                            }
-                        })
-                        .finally(() => {
-                            if (ttsGeneration === aiTTSGenerationRef.current) {
-                                setAITTSSynthesizing(false);
-                            }
-                        });
-                }
-            }
+            const textToSpeak = isEdit ? result.replacement : (result.supportReport || '');
+            speakHUDText(textToSpeak, requestSettings);
         } catch (err) {
             if (requestGeneration === aiRequestGenerationRef.current) {
                 setError(localizedAIError(err));
@@ -2305,13 +2458,14 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         runAIPrompt();
     }
 
-    function hotkeyIsUsedByAnother(nextHotkey: string, field: 'flow' | 'prompt' | 'tts') {
+    function hotkeyIsUsedByAnother(nextHotkey: string, field: 'flow' | 'ocr' | 'prompt' | 'tts') {
         if (!generalSettings || !aiSettings) {
             return false;
         }
         const candidate = normalizedHotkey(nextHotkey);
         const assigned = {
             flow: generalSettings.flowToggleHotkey,
+            ocr: generalSettings.ocrHotkey,
             prompt: aiSettings.hotkey,
             tts: aiSettings.ttsShortcut,
         };
@@ -2368,6 +2522,31 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
         setError('');
         updateGeneralSettings({ flowToggleHotkey: nextHotkey });
         setRecordingFlowToggleHotkey(false);
+    }
+
+    function captureOCRHotkey(event: KeyboardEvent<HTMLButtonElement>) {
+        if (!recordingOCRHotkey || !generalSettings) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (event.key === 'Escape') {
+            setRecordingOCRHotkey(false);
+            return;
+        }
+
+        const nextHotkey = formatCapturedHotkey(event);
+        if (!nextHotkey) {
+            return;
+        }
+        if (hotkeyIsUsedByAnother(nextHotkey, 'ocr')) {
+            setError(t('hotkeyAlreadyAssigned'));
+            return;
+        }
+        setError('');
+        updateGeneralSettings({ ocrHotkey: nextHotkey });
+        setRecordingOCRHotkey(false);
     }
 
     function captureTtsHotkey(event: KeyboardEvent<HTMLButtonElement>) {
@@ -2451,6 +2630,82 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
 
             <main className="workspace">
                 {windowMode === 'hud' ? (
+                    isOCRHUD ? (
+                        <section className="ai-hud ocr-hud">
+                            <div className="ai-result hud-result ocr-hud-result">
+                                <div className="hud-result-content">
+                                    <button
+                                        className="ocr-hud-close"
+                                        type="button"
+                                        onClick={() => hideCurrentWindow()}
+                                        aria-label={t('close')}
+                                        title={t('close')}
+                                    >
+                                        <span className="material-symbols-rounded" aria-hidden="true">close</span>
+                                    </button>
+                                    <pre>{ocrText || error || t('ocrNoTextRecognized')}</pre>
+                                </div>
+                                <div className="hud-result-footer">
+                                    {aiTTSSynthesizing && (
+                                        <div className="hud-tts-status" role="status" aria-live="polite">
+                                            <span className="hud-tts-spinner" aria-hidden="true" />
+                                            <span>{t('ttsSynthesizing')}</span>
+                                        </div>
+                                    )}
+                                    {!aiTTSSynthesizing &&
+                                        aiTTSAudioReady &&
+                                        aiSettings?.ttsShowAudioActions !== false && (
+                                        <div className="hud-result-actions hud-tts-actions" role="group" aria-label={t('audioActions')}>
+                                            <button
+                                                type="button"
+                                                onClick={replayAITTSAudio}
+                                                disabled={aiTTSAudioAction === 'replaying' || aiTTSAudioAction === 'saving'}
+                                                title={t('replayAudioTitle')}
+                                            >
+                                                <span className="material-symbols-rounded" aria-hidden="true">replay</span>
+                                                <span>{t('replayAudio')}</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={saveAITTSAudio}
+                                                disabled={aiTTSAudioAction === 'replaying' || aiTTSAudioAction === 'saving'}
+                                                title={t('saveAudioTitle')}
+                                            >
+                                                <span className="material-symbols-rounded" aria-hidden="true">
+                                                    {aiTTSAudioAction === 'saved' ? 'check' : 'download'}
+                                                </span>
+                                                <span>{aiTTSAudioAction === 'saved' ? t('audioSaved') : t('saveAudio')}</span>
+                                            </button>
+                                        </div>
+                                    )}
+                                    {!!ocrText && (
+                                        <div className="hud-result-actions" role="group" aria-label={t('responseActions')}>
+                                            <button
+                                                type="button"
+                                                onClick={insertOCRText}
+                                                disabled={aiContext.sourceProcessId <= 0 || aiResponseAction === 'inserting'}
+                                                title={t('insertOCRText')}
+                                            >
+                                                <span className="material-symbols-rounded" aria-hidden="true">input</span>
+                                                <span>{t('insert')}</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={copyAIResponse}
+                                                disabled={aiResponseAction === 'copying'}
+                                                title={t('copyOCRText')}
+                                            >
+                                                <span className="material-symbols-rounded" aria-hidden="true">
+                                                    {aiResponseAction === 'copied' ? 'check' : 'content_copy'}
+                                                </span>
+                                                <span>{aiResponseAction === 'copied' ? t('copied') : t('copy')}</span>
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </section>
+                    ) : (
                     <section className="ai-hud">
                         {aiScreenshot && (
                             <div className="hud-screenshot-preview">
@@ -2595,6 +2850,7 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                             </div>
                         )}
                     </section>
+                    )
                 ) : activeView === 'snippets' ? (
                     <section className="content-grid">
                         <div className="panel labels-panel">
@@ -3114,6 +3370,75 @@ function MainApp({ isHUD }: { isHUD: boolean }) {
                                                         startAtLogin: event.target.checked,
                                                     })}
                                                 />
+                                            </label>
+                                        </div>
+                                    </section>
+                                )}
+                                {isMacOS && generalSettings && (
+                                    <section className="settings-section ocr-settings">
+                                        <div className="panel-header compact">
+                                            <div>
+                                                <h2>{t('ocr')}</h2>
+                                                <p>{t('ocrSettingsDescription')}</p>
+                                            </div>
+                                        </div>
+                                        <div className="settings-form-grid">
+                                            <label className="checkbox-setting">
+                                                <span>{t('useAppleVisionOCR')}</span>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={generalSettings.appleVisionOcrEnabled}
+                                                    disabled={settingsSaving}
+                                                    onChange={(event) => updateGeneralSettings({
+                                                        appleVisionOcrEnabled: event.target.checked,
+                                                    })}
+                                                />
+                                            </label>
+                                            <label>
+                                                {t('ocrHotkey')}
+                                                <HotkeyCaptureControl
+                                                    value={generalSettings.ocrHotkey}
+                                                    recording={recordingOCRHotkey}
+                                                    onStart={() => {
+                                                        setError("");
+                                                        setRecordingOCRHotkey(true);
+                                                    }}
+                                                    onStop={() => setRecordingOCRHotkey(false)}
+                                                    onKeyDown={captureOCRHotkey}
+                                                    onClear={() => {
+                                                        setError("");
+                                                        setRecordingOCRHotkey(false);
+                                                        updateGeneralSettings({ ocrHotkey: "" });
+                                                    }}
+                                                    t={t}
+                                                />
+                                            </label>
+                                            <label>
+                                                {t('ocrRecognitionPriority')}
+                                                <select
+                                                    value={generalSettings.ocrRecognitionLanguage}
+                                                    disabled={!generalSettings.appleVisionOcrEnabled || settingsSaving}
+                                                    onChange={(event) => updateGeneralSettings({
+                                                        ocrRecognitionLanguage: event.target.value,
+                                                    })}
+                                                >
+                                                    {ocrLanguageOptions.map((option) => (
+                                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                            <label>
+                                                {t('ocrResultAction')}
+                                                <select
+                                                    value={generalSettings.ocrResultAction}
+                                                    disabled={!generalSettings.appleVisionOcrEnabled || settingsSaving}
+                                                    onChange={(event) => updateGeneralSettings({
+                                                        ocrResultAction: event.target.value,
+                                                    })}
+                                                >
+                                                    <option value="clipboard">{t('copyToClipboard')}</option>
+                                                    <option value="show">{t('showRecognizedText')}</option>
+                                                </select>
                                             </label>
                                         </div>
                                     </section>

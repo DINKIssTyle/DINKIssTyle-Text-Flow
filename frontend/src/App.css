@@ -576,6 +576,43 @@ button:not(:disabled):focus-visible {
     overflow: visible;
 }
 
+.ocr-hud-result {
+    position: relative;
+}
+
+.ocr-hud .hud-result-content {
+    max-height: 500px;
+    overflow: auto;
+}
+
+.ocr-hud .hud-result-content pre {
+    overflow: visible;
+}
+
+.ocr-hud-close {
+    float: right;
+    display: inline-grid;
+    width: 24px;
+    height: 24px;
+    place-items: center;
+    margin: -3px -4px 4px 8px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+}
+
+.ocr-hud-close:not(:disabled):hover {
+    border: 0;
+    background: var(--active-bg);
+    box-shadow: none;
+}
+
+.ocr-hud-close .material-symbols-rounded {
+    font-size: 18px;
+}
+
 .hud-result-footer {
     display: flex;
     min-width: 0;

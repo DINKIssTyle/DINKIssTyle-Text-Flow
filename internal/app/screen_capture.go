@@ -3,7 +3,11 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os/exec"
+	"strings"
 
+	"dkst-text-flow/internal/ocr"
 	"dkst-text-flow/internal/platform"
 	"dkst-text-flow/internal/windowing"
 
@@ -21,6 +25,28 @@ type ScreenRegionSelection struct {
 }
 
 func (a *App) BeginScreenRegionCapture() error {
+	return a.beginScreenRegionCapture(false, 0)
+}
+
+func (a *App) beginOCRScreenRegionCapture(sourceProcessID int) error {
+	settings, err := a.GetGeneralSettings()
+	if err != nil {
+		return err
+	}
+	if !settings.AppleVisionOCREnabled {
+		return errors.New("Apple Vision OCR is disabled")
+	}
+	if err := a.beginScreenRegionCapture(true, sourceProcessID); err != nil {
+		a.showOCRWindow(OCRInvocation{
+			SourceProcessID: sourceProcessID,
+			Error:           err.Error(),
+		})
+		return err
+	}
+	return nil
+}
+
+func (a *App) beginScreenRegionCapture(forOCR bool, sourceProcessID int) error {
 	a.screenCaptureMu.Lock()
 	if a.screenCaptureActive {
 		a.screenCaptureMu.Unlock()
@@ -31,12 +57,19 @@ func (a *App) BeginScreenRegionCapture() error {
 	a.screenCaptureCompleting = false
 	a.screenCaptureContext = ctx
 	a.screenCaptureCancel = cancel
+	a.screenCaptureForOCR = forOCR
+	a.screenCaptureSourcePID = sourceProcessID
 	a.screenCaptureMu.Unlock()
 
 	appInst := application.Get()
 	if aiWindow, ok := appInst.Window.GetByName("ai"); ok {
 		application.InvokeSync(func() {
 			aiWindow.Hide()
+		})
+	}
+	if ocrWindow, ok := appInst.Window.GetByName("ocr"); ok {
+		application.InvokeSync(func() {
+			ocrWindow.Hide()
 		})
 	}
 	if err := a.beginPlatformScreenRegionCapture(ctx); err != nil {
@@ -66,6 +99,8 @@ func (a *App) cancelScreenRegionCapture(restoreHUD bool) {
 		a.screenCaptureCompleting = false
 		a.screenCaptureContext = nil
 		a.screenCaptureCancel = nil
+		a.screenCaptureForOCR = false
+		a.screenCaptureSourcePID = 0
 	}
 	windows := append([]application.Window(nil), a.screenCaptureWindows...)
 	if !restoreHUD {
@@ -95,6 +130,10 @@ func (a *App) finishScreenRegionCapture(result platform.ScreenCaptureResult, cap
 	a.screenCaptureCompleting = false
 	a.screenCaptureContext = nil
 	a.screenCaptureCancel = nil
+	forOCR := a.screenCaptureForOCR
+	sourceProcessID := a.screenCaptureSourcePID
+	a.screenCaptureForOCR = false
+	a.screenCaptureSourcePID = 0
 	windows := a.screenCaptureWindows
 	a.screenCaptureWindows = nil
 	a.screenCaptureMu.Unlock()
@@ -105,8 +144,13 @@ func (a *App) finishScreenRegionCapture(result platform.ScreenCaptureResult, cap
 	for _, captureWindow := range windows {
 		captureWindow.Close()
 	}
+	if forOCR {
+		a.finishOCRScreenRegionCapture(result, captureErr, sourceProcessID)
+		return
+	}
+
+	appInst := application.Get()
 	application.InvokeSync(func() {
-		appInst := application.Get()
 		if aiWindow, ok := appInst.Window.GetByName("ai"); ok {
 			aiWindow.SetAlwaysOnTop(true)
 			aiWindow.UnMinimise()
@@ -115,8 +159,6 @@ func (a *App) finishScreenRegionCapture(result platform.ScreenCaptureResult, cap
 			aiWindow.Focus()
 		}
 	})
-
-	appInst := application.Get()
 	switch {
 	case captureErr != nil:
 		appInst.Event.Emit("ai:screenshot-error", captureErr.Error())
@@ -125,6 +167,102 @@ func (a *App) finishScreenRegionCapture(result platform.ScreenCaptureResult, cap
 	default:
 		appInst.Event.Emit("ai:screenshot-captured", result)
 	}
+}
+
+type OCRInvocation struct {
+	Text            string `json:"text"`
+	SourceProcessID int    `json:"sourceProcessId"`
+	Error           string `json:"error,omitempty"`
+}
+
+func (a *App) finishOCRScreenRegionCapture(
+	result platform.ScreenCaptureResult,
+	captureErr error,
+	sourceProcessID int,
+) {
+	if result.Canceled {
+		if sourceProcessID > 0 {
+			_ = platform.ActivateProcess(sourceProcessID)
+		}
+		return
+	}
+	if captureErr != nil {
+		a.showOCRWindow(OCRInvocation{
+			SourceProcessID: sourceProcessID,
+			Error:           captureErr.Error(),
+		})
+		return
+	}
+
+	settings, err := a.GetGeneralSettings()
+	if err != nil {
+		a.showOCRWindow(OCRInvocation{SourceProcessID: sourceProcessID, Error: err.Error()})
+		return
+	}
+	recognized, err := ocr.RecognizePNG(result.PNGData, settings.OCRRecognitionLanguage)
+	if err != nil {
+		a.showOCRWindow(OCRInvocation{SourceProcessID: sourceProcessID, Error: err.Error()})
+		return
+	}
+	if strings.TrimSpace(recognized.Text) == "" {
+		a.showOCRWindow(OCRInvocation{
+			SourceProcessID: sourceProcessID,
+			Error:           "Apple Vision OCR did not recognize any text",
+		})
+		return
+	}
+
+	if settings.OCRResultAction == ocr.ResultActionClipboard {
+		if err := copyTextToClipboard(recognized.Text); err != nil {
+			a.showOCRWindow(OCRInvocation{SourceProcessID: sourceProcessID, Error: err.Error()})
+			return
+		}
+		if sourceProcessID > 0 {
+			_ = platform.ActivateProcess(sourceProcessID)
+		}
+		application.Get().Event.Emit("ocr:copied", recognized.Text)
+		return
+	}
+
+	a.showOCRWindow(OCRInvocation{
+		Text:            recognized.Text,
+		SourceProcessID: sourceProcessID,
+	})
+}
+
+func copyTextToClipboard(text string) error {
+	command := exec.Command("/usr/bin/pbcopy")
+	command.Stdin = strings.NewReader(text)
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("failed to copy OCR text to the clipboard: %w", err)
+	}
+	return nil
+}
+
+func (a *App) showOCRWindow(invocation OCRInvocation) {
+	appInst := application.Get()
+	if appInst == nil {
+		return
+	}
+	application.InvokeSync(func() {
+		if mainWindow, ok := appInst.Window.GetByName("main"); ok {
+			mainWindow.Hide()
+		}
+		if aiWindow, ok := appInst.Window.GetByName("ai"); ok {
+			aiWindow.Hide()
+		}
+		if ocrWindow, ok := appInst.Window.GetByName("ocr"); ok {
+			ocrWindow.SetMinSize(460, 120)
+			ocrWindow.SetSize(460, 220)
+			ocrWindow.Center()
+			ocrWindow.SetAlwaysOnTop(true)
+			ocrWindow.UnMinimise()
+			ocrWindow.Show()
+			windowing.ActivateForInput(ocrWindow)
+			ocrWindow.Focus()
+		}
+	})
+	appInst.Event.Emit("ocr:result", invocation)
 }
 
 func (a *App) hideScreenCaptureWindows() {

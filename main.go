@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"log"
+	"runtime"
 
 	appservice "dkst-text-flow/internal/app"
 
@@ -91,6 +92,34 @@ func main() {
 		event.Cancel()
 		aiWindow.Hide()
 	})
+
+	if runtime.GOOS == "darwin" {
+		ocrWindow := appInst.Window.NewWithOptions(application.WebviewWindowOptions{
+			Name:                "ocr",
+			Title:               "Apple Vision OCR",
+			Width:               460,
+			Height:              220,
+			MinWidth:            460,
+			MinHeight:           120,
+			AlwaysOnTop:         true,
+			Hidden:              true,
+			URL:                 "/?mode=ocr",
+			Frameless:           true,
+			BackgroundType:      application.BackgroundTypeTransparent,
+			MaximiseButtonState: application.ButtonDisabled,
+			Mac: application.MacWindow{
+				TitleBar: application.MacTitleBar{
+					Hide:            true,
+					FullSizeContent: true,
+				},
+			},
+		})
+
+		ocrWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+			event.Cancel()
+			ocrWindow.Hide()
+		})
+	}
 
 	// Run the application
 	err := appInst.Run()

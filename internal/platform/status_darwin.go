@@ -764,6 +764,7 @@ static char* DKSTSelectedTextByCopyShortcutForPID(pid_t pid) {
 import "C"
 
 import (
+	"errors"
 	"strings"
 	"unsafe"
 )
@@ -829,6 +830,18 @@ func replaceSelectedTextInProcess(processID int, replacement string, preferPaste
 		return nil
 	}
 	_ = activateProcess(processID)
+	return nil
+}
+
+func insertTextAtCursorInProcess(processID int, text string) error {
+	if processID <= 0 {
+		return errors.New("insertion target process is missing")
+	}
+	value := C.CString(text)
+	defer C.free(unsafe.Pointer(value))
+	if C.DKSTReplaceSelectedTextForPID(C.pid_t(processID), value, 1) != 1 {
+		return errors.New("could not insert text at the cursor")
+	}
 	return nil
 }
 

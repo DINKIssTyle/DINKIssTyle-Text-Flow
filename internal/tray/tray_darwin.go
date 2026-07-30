@@ -45,7 +45,12 @@ func (m *Manager) UpdateState(state State) {
 	if m == nil || m.native == nil {
 		return
 	}
-	C.dkstSystemTrayUpdateState(m.native, C.int(boolInt(state.FlowPaused)), C.int(boolInt(state.Running)))
+	C.dkstSystemTrayUpdateState(
+		m.native,
+		C.int(boolInt(state.FlowPaused)),
+		C.int(boolInt(state.Running)),
+		C.int(boolInt(state.OCREnabled)),
+	)
 }
 
 func boolInt(value bool) int {
@@ -83,5 +88,7 @@ func dkstSystemTrayMenuSelected(itemID C.int) {
 		call(manager.actions.ToggleFlow)
 	case 4:
 		call(manager.actions.Quit)
+	case 5:
+		call(manager.actions.OCR)
 	}
 }

@@ -28,6 +28,10 @@ func replaceSelectedTextInProcess(processID int, replacement string, preferPaste
 	return nil
 }
 
+func insertTextAtCursorInProcess(processID int, text string) error {
+	return nil
+}
+
 func activateProcess(processID int) error {
 	return nil
 }

@@ -44,6 +44,10 @@ func ReplaceSelectedTextInProcess(processID int, replacement string, preferPaste
 	return replaceSelectedTextInProcess(processID, replacement, preferPaste)
 }
 
+func InsertTextAtCursorInProcess(processID int, text string) error {
+	return insertTextAtCursorInProcess(processID, text)
+}
+
 func ActivateProcess(processID int) error {
 	return activateProcess(processID)
 }

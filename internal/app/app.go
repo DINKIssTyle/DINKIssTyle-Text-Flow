@@ -16,6 +16,7 @@ import (
 	"dkst-text-flow/internal/flowengine"
 	"dkst-text-flow/internal/hotkey"
 	"dkst-text-flow/internal/loginitem"
+	"dkst-text-flow/internal/ocr"
 	"dkst-text-flow/internal/platform"
 	"dkst-text-flow/internal/speech"
 	"dkst-text-flow/internal/storage"
@@ -43,12 +44,16 @@ const (
 )
 
 type GeneralSettings struct {
-	ThemeMode          string `json:"themeMode"`
-	Language           string `json:"language"`
-	TypingTrendEnabled bool   `json:"typingTrendEnabled"`
-	StartAtLogin       bool   `json:"startAtLogin"`
-	SoundName          string `json:"soundName"`
-	FlowToggleHotkey   string `json:"flowToggleHotkey"`
+	ThemeMode              string `json:"themeMode"`
+	Language               string `json:"language"`
+	TypingTrendEnabled     bool   `json:"typingTrendEnabled"`
+	StartAtLogin           bool   `json:"startAtLogin"`
+	SoundName              string `json:"soundName"`
+	FlowToggleHotkey       string `json:"flowToggleHotkey"`
+	AppleVisionOCREnabled  bool   `json:"appleVisionOcrEnabled"`
+	OCRHotkey              string `json:"ocrHotkey"`
+	OCRRecognitionLanguage string `json:"ocrRecognitionLanguage"`
+	OCRResultAction        string `json:"ocrResultAction"`
 }
 
 type ApplicationSettings struct {
@@ -110,6 +115,8 @@ type App struct {
 	screenCaptureActive     bool
 	screenCaptureCompleting bool
 	screenCaptureWindows    []application.Window
+	screenCaptureForOCR     bool
+	screenCaptureSourcePID  int
 	flowPaused              bool
 	flowStatusStopper       context.CancelFunc
 	trayManager             *tray.Manager
@@ -372,7 +379,15 @@ func (a *App) reconcileFlowStatus(emit bool) platform.Status {
 	a.flowLifecycleMu.Unlock()
 
 	if a.trayManager != nil {
-		a.trayManager.UpdateState(tray.State{FlowPaused: paused, Running: status.FlowEngineRunning})
+		ocrEnabled := false
+		if settings, err := a.GetGeneralSettings(); err == nil {
+			ocrEnabled = settings.AppleVisionOCREnabled
+		}
+		a.trayManager.UpdateState(tray.State{
+			FlowPaused: paused,
+			Running:    status.FlowEngineRunning,
+			OCREnabled: ocrEnabled,
+		})
 	}
 	if emit {
 		if appInst := application.Get(); appInst != nil {
@@ -463,13 +478,14 @@ func (a *App) SaveGeneralSettings(settings GeneralSettings) (GeneralSettings, er
 	if err := validateUniqueHotkeys(normalized, aiSettings); err != nil {
 		return GeneralSettings{}, err
 	}
-	if err := loginitem.SetEnabled(normalized.StartAtLogin); err != nil {
+	if err := a.updateStartAtLoginIfChanged(normalized.StartAtLogin); err != nil {
 		return GeneralSettings{}, err
 	}
 	if err := a.store.SetJSONSetting(generalSettingsKey, normalized); err != nil {
 		return GeneralSettings{}, err
 	}
 	a.configureGlobalShortcuts()
+	a.reconcileFlowStatus(false)
 	if appInst := application.Get(); appInst != nil {
 		appInst.Event.Emit("general:settings-updated", normalized)
 	}
@@ -489,7 +505,7 @@ func (a *App) SaveApplicationSettings(general GeneralSettings, settings ai.Setti
 	if err := validateUniqueHotkeys(normalizedGeneral, normalizedAI); err != nil {
 		return ApplicationSettings{}, err
 	}
-	if err := loginitem.SetEnabled(normalizedGeneral.StartAtLogin); err != nil {
+	if err := a.updateStartAtLoginIfChanged(normalizedGeneral.StartAtLogin); err != nil {
 		return ApplicationSettings{}, err
 	}
 	if err := a.store.SetJSONSetting(generalSettingsKey, normalizedGeneral); err != nil {
@@ -504,6 +520,7 @@ func (a *App) SaveApplicationSettings(general GeneralSettings, settings ai.Setti
 	}
 
 	a.configureGlobalShortcuts()
+	a.reconcileFlowStatus(false)
 	if appInst := application.Get(); appInst != nil {
 		appInst.Event.Emit("general:settings-updated", normalizedGeneral)
 		appInst.Event.Emit("ai:settings-updated", normalizedAI)
@@ -820,6 +837,24 @@ func (a *App) ReplaceSelectedText(processID int, replacement string) error {
 	return platform.ReplaceSelectedTextInProcess(processID, replacement, preferPaste)
 }
 
+func (a *App) InsertOCRTextAtCursor(processID int, text string) error {
+	if processID <= 0 {
+		return errors.New("OCR insertion target is missing")
+	}
+	if strings.TrimSpace(text) == "" {
+		return errors.New("OCR text is empty")
+	}
+	return platform.InsertTextAtCursorInProcess(processID, text)
+}
+
+func (a *App) GetExternalFrontmostProcessID() int {
+	processID := platform.GetFrontmostPID()
+	if processID == os.Getpid() {
+		return 0
+	}
+	return processID
+}
+
 func (a *App) IsFocusedElementEditable(processID int) bool {
 	return platform.IsFocusedElementEditableForProcess(processID)
 }
@@ -861,6 +896,9 @@ func (a *App) configureSystemTray(appInst *application.App) {
 	a.trayManager = tray.New(appInst, a.menuIcon, a.pausedMenuIcon, tray.Actions{
 		AskAI: func() {
 			go a.showAIPrompt(platform.GetFrontmostPID(), false)
+		},
+		OCR: func() {
+			go a.beginOCRScreenRegionCapture(platform.GetFrontmostPID())
 		},
 		ShowMainWindow: func() {
 			go a.ShowMainWindow()
@@ -929,6 +967,16 @@ func (a *App) configureGlobalShortcuts() {
 		})
 		if err != nil {
 			println("failed to register Flow toggle hotkey:", err.Error())
+		}
+	}
+	if runtime.GOOS == "darwin" &&
+		generalSettings.AppleVisionOCREnabled &&
+		generalSettings.OCRHotkey != "" {
+		err = appInst.GlobalShortcut.Register(generalSettings.OCRHotkey, func() {
+			go a.beginOCRScreenRegionCapture(platform.GetFrontmostPID())
+		})
+		if err != nil {
+			println("failed to register OCR hotkey:", err.Error())
 		}
 	}
 	if a.isFlowPaused() {
@@ -1014,21 +1062,32 @@ func (a *App) showAIPrompt(sourceProcessID int, requireEnabled bool) {
 // ResizeAIPromptWindow smoothly resizes the AI prompt. Screenshot previews keep
 // the bottom edge fixed so the HUD grows upward instead of covering more content below.
 func (a *App) ResizeAIPromptWindow(height int, growUp bool) {
+	a.resizeHUDWindow("ai", height, growUp)
+}
+
+func (a *App) ResizeOCRWindow(height int, growUp bool) {
+	a.resizeHUDWindow("ocr", height, growUp)
+}
+
+func (a *App) resizeHUDWindow(name string, height int, growUp bool) {
 	const (
 		width     = 460
-		minHeight = 74
 		maxHeight = 620
 	)
+	minHeight := 74
+	if name == "ocr" {
+		minHeight = 120
+	}
 	height = max(minHeight, min(maxHeight, height))
 
 	appInst := application.Get()
-	if aiWin, ok := appInst.Window.GetByName("ai"); ok {
+	if hudWindow, ok := appInst.Window.GetByName(name); ok {
 		application.InvokeSync(func() {
 			if growUp {
-				windowing.ResizeFromBottom(aiWin, width, height)
+				windowing.ResizeFromBottom(hudWindow, width, height)
 				return
 			}
-			windowing.ResizeFromTop(aiWin, width, height)
+			windowing.ResizeFromTop(hudWindow, width, height)
 		})
 	}
 }
@@ -1361,12 +1420,38 @@ func appIdentifierBase(value string) string {
 
 func DefaultGeneralSettings() GeneralSettings {
 	return GeneralSettings{
-		ThemeMode:          ThemeAuto,
-		Language:           LanguageEnglish,
-		TypingTrendEnabled: true,
-		SoundName:          "None",
-		FlowToggleHotkey:   "",
+		ThemeMode:              ThemeAuto,
+		Language:               LanguageEnglish,
+		TypingTrendEnabled:     true,
+		SoundName:              "None",
+		FlowToggleHotkey:       "",
+		AppleVisionOCREnabled:  false,
+		OCRHotkey:              "",
+		OCRRecognitionLanguage: ocr.LanguageAutomatic,
+		OCRResultAction:        ocr.ResultActionShow,
 	}
+}
+
+func (a *App) updateStartAtLoginIfChanged(enabled bool) error {
+	if a.store == nil {
+		return errors.New("storage is not ready")
+	}
+
+	stored := DefaultGeneralSettings()
+	found, err := a.store.GetJSONSetting(generalSettingsKey, &stored)
+	if err != nil {
+		return err
+	}
+	if found && stored.StartAtLogin == enabled {
+		return nil
+	}
+	if loginitem.Enabled() == enabled {
+		return nil
+	}
+	if err := loginitem.SetEnabled(enabled); err != nil {
+		return fmt.Errorf("update start at login: %w", err)
+	}
+	return nil
 }
 
 func DefaultAIPromptSettings() AIPromptSettings {
@@ -1411,6 +1496,7 @@ func validateUniqueHotkeys(general GeneralSettings, settings ai.Settings) error 
 		value string
 	}{
 		{name: "Flow toggle hotkey", value: general.FlowToggleHotkey},
+		{name: "OCR hotkey", value: general.OCRHotkey},
 		{name: "Prompt hotkey", value: settings.Hotkey},
 		{name: "TTS hotkey", value: settings.TTSShortcut},
 	}
@@ -1457,5 +1543,30 @@ func NormalizeGeneralSettings(settings GeneralSettings) GeneralSettings {
 		}
 	}
 
+	settings.OCRHotkey = strings.TrimSpace(settings.OCRHotkey)
+	if settings.OCRHotkey != "" {
+		if parsed, err := hotkey.Parse(settings.OCRHotkey); err == nil {
+			settings.OCRHotkey = parsed.Canonical
+		} else {
+			settings.OCRHotkey = ""
+		}
+	}
+
+	settings.OCRRecognitionLanguage = strings.TrimSpace(settings.OCRRecognitionLanguage)
+	if settings.OCRRecognitionLanguage == "" {
+		settings.OCRRecognitionLanguage = ocr.LanguageAutomatic
+	}
+
+	settings.OCRResultAction = strings.TrimSpace(settings.OCRResultAction)
+	switch settings.OCRResultAction {
+	case ocr.ResultActionClipboard, ocr.ResultActionShow:
+	default:
+		settings.OCRResultAction = ocr.ResultActionShow
+	}
+
 	return settings
+}
+
+func (a *App) GetOCRLanguages() ([]string, error) {
+	return ocr.SupportedLanguages()
 }

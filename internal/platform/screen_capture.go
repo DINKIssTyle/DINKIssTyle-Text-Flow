@@ -24,6 +24,7 @@ type ScreenCaptureResult struct {
 	Width    int    `json:"width"`
 	Height   int    `json:"height"`
 	Canceled bool   `json:"canceled"`
+	PNGData  []byte `json:"-"`
 }
 
 func validateScreenCaptureRect(rect ScreenCaptureRect) error {
@@ -52,6 +53,7 @@ func screenCaptureResultFromPNG(data []byte) (ScreenCaptureResult, error) {
 		MimeType: "image/png",
 		Width:    config.Width,
 		Height:   config.Height,
+		PNGData:  append([]byte(nil), data...),
 	}, nil
 }
 

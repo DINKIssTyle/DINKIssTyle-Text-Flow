@@ -141,6 +141,10 @@ func replaceSelectedTextInProcess(processID int, replacement string, preferPaste
 	return nil
 }
 
+func insertTextAtCursorInProcess(processID int, text string) error {
+	return replaceSelectedTextInProcess(processID, text, true)
+}
+
 func restoreReplacementClipboard(generation uint64, replacement string) {
 	time.Sleep(clipboardPasteSettleDuration)
 

@@ -3,7 +3,8 @@
 
 void *dkstSystemTrayCreate(const unsigned char *activeIconBytes, int activeIconLength,
                            const unsigned char *pausedIconBytes, int pausedIconLength);
-void dkstSystemTrayUpdateState(void *tray, int flowPaused, int running);
+void dkstSystemTrayUpdateState(void *tray, int flowPaused, int running,
+                               int ocrEnabled);
 void dkstSystemTrayDestroy(void *tray);
 
 #endif
