@@ -587,13 +587,13 @@ button:not(:disabled):focus-visible {
 
 .ocr-loading-status {
     display: flex;
-    min-height: 62px;
     align-items: center;
     justify-content: center;
     gap: 8px;
     color: var(--muted);
     font-size: 12px;
     font-weight: 600;
+    white-space: nowrap;
 }
 
 .ocr-loading-status .hud-tts-spinner {

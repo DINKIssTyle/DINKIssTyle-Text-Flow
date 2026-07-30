@@ -298,8 +298,8 @@ func (a *App) showOCRWindow(invocation OCRInvocation) {
 			aiWindow.Hide()
 		}
 		if ocrWindow, ok := appInst.Window.GetByName("ocr"); ok {
-			ocrWindow.SetMinSize(460, 120)
-			ocrWindow.SetSize(460, 220)
+			ocrWindow.SetMinSize(460, 74)
+			ocrWindow.SetSize(460, 74)
 			ocrWindow.Center()
 			ocrWindow.SetAlwaysOnTop(true)
 			ocrWindow.UnMinimise()

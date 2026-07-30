@@ -1096,9 +1096,6 @@ func (a *App) resizeHUDWindow(name string, height int, growUp bool) {
 		maxHeight = 620
 	)
 	minHeight := 74
-	if name == "ocr" {
-		minHeight = 120
-	}
 	height = max(minHeight, min(maxHeight, height))
 
 	appInst := application.Get()
