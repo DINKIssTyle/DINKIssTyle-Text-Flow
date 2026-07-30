@@ -26,6 +26,7 @@ const (
 	vkV                            = 0x56
 	vkLWin                         = 0x5B
 	vkRWin                         = 0x5C
+	swRestore                      = 9
 	hotkeyReleaseTimeout           = 750 * time.Millisecond
 	clipboardCopyTimeout           = 500 * time.Millisecond
 	clipboardPollInterval          = 20 * time.Millisecond
@@ -40,6 +41,7 @@ var (
 	procSetForegroundWindow    = user32.NewProc("SetForegroundWindow")
 	procEnumWindows            = user32.NewProc("EnumWindows")
 	procIsWindowVisible        = user32.NewProc("IsWindowVisible")
+	procIsIconic               = user32.NewProc("IsIconic")
 	procShowWindowAsync        = user32.NewProc("ShowWindowAsync")
 	procKeybdEvent             = user32.NewProc("keybd_event")
 	procGetAsyncKeyState       = user32.NewProc("GetAsyncKeyState")
@@ -166,9 +168,19 @@ func restoreReplacementClipboard(generation uint64, replacement string) {
 }
 
 func activateProcess(processID int) error {
+	if processID <= 0 {
+		return nil
+	}
+	if getFrontmostPID() == processID {
+		return nil
+	}
+
 	hwnd := windowForPID(processID)
 	if hwnd != 0 {
-		procShowWindowAsync.Call(hwnd, 9)
+		minimized, _, _ := procIsIconic.Call(hwnd)
+		if minimized != 0 {
+			procShowWindowAsync.Call(hwnd, swRestore)
+		}
 		activated, _, _ := procSetForegroundWindow.Call(hwnd)
 		if activated != 0 {
 			time.Sleep(60 * time.Millisecond)

@@ -568,6 +568,20 @@ button:not(:disabled):focus-visible {
     --wails-draggable: drag;
 }
 
+.floating-capture-surface.has-window-shadow {
+    box-sizing: border-box;
+}
+
+.floating-capture-shadow-frame {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.42);
+    --wails-draggable: drag;
+}
+
 .floating-capture-image {
     display: block;
     width: 100%;

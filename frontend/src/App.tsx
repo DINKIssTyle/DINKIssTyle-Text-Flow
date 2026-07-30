@@ -623,7 +623,13 @@ function ScreenCaptureOverlay({ screenID }: { screenID: string }) {
     );
 }
 
-function FloatingCaptureWindow({ captureID }: { captureID: string }) {
+function FloatingCaptureWindow({
+    captureID,
+    shadowPadding,
+}: {
+    captureID: string;
+    shadowPadding: number;
+}) {
     const [capture, setCapture] = useState<FloatingCaptureInfo | null>(null);
     const [opacity, setOpacity] = useState(1);
     const [status, setStatus] = useState('');
@@ -737,8 +743,8 @@ function FloatingCaptureWindow({ captureID }: { captureID: string }) {
         return () => window.removeEventListener('keydown', handleShortcut, true);
     }, [captureID]);
 
-    return (
-        <div className="floating-capture-surface" onWheel={adjustOpacity}>
+    const content = (
+        <>
             {capture && (
                 <img
                     className="floating-capture-image"
@@ -769,6 +775,19 @@ function FloatingCaptureWindow({ captureID }: { captureID: string }) {
             </div>
             {status && <div className="floating-capture-status">{status}</div>}
             {error && <div className="floating-capture-error" role="alert">{error}</div>}
+        </>
+    );
+    const hasWindowShadow = shadowPadding > 0;
+
+    return (
+        <div
+            className={`floating-capture-surface${hasWindowShadow ? ' has-window-shadow' : ''}`}
+            onWheel={adjustOpacity}
+            style={hasWindowShadow ? { padding: shadowPadding } : undefined}
+        >
+            {hasWindowShadow ? (
+                <div className="floating-capture-shadow-frame">{content}</div>
+            ) : content}
         </div>
     );
 }
@@ -780,7 +799,16 @@ function App() {
         return <ScreenCaptureOverlay screenID={params.get('screenId') || ''} />;
     }
     if (mode === 'floating') {
-        return <FloatingCaptureWindow captureID={params.get('id') || ''} />;
+        const parsedPadding = Number.parseInt(params.get('shadowPadding') || '0', 10);
+        const shadowPadding = Number.isFinite(parsedPadding)
+            ? Math.max(0, Math.min(64, parsedPadding))
+            : 0;
+        return (
+            <FloatingCaptureWindow
+                captureID={params.get('id') || ''}
+                shadowPadding={shadowPadding}
+            />
+        );
     }
     const hudMode = mode === 'ocr' ? 'ocr' : (mode === 'hud' ? 'ai' : null);
     return <MainApp hudMode={hudMode} />;

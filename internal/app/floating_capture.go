@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ type floatingCapture struct {
 	pixelWidth     int
 	pixelHeight    int
 	originalBounds application.Rect
+	shadowPadding  int
 	window         application.Window
 }
 
@@ -90,19 +92,24 @@ func (a *App) createFloatingCapture(
 		pixelWidth:     result.Width,
 		pixelHeight:    result.Height,
 		originalBounds: placement.LogicalBounds,
+		shadowPadding:  floatingCaptureShadowPadding(),
 	}
 	a.floatingCaptures[id] = entry
 	a.floatingCaptureMu.Unlock()
 
 	windowName := "floating-capture-" + id
 	windowURL := "/?mode=floating&id=" + id
+	if entry.shadowPadding > 0 {
+		windowURL += fmt.Sprintf("&shadowPadding=%d", entry.shadowPadding)
+	}
+	windowBounds := floatingCaptureWindowBounds(entry.originalBounds, entry.shadowPadding)
 	options := application.WebviewWindowOptions{
 		Name:                       windowName,
 		Title:                      "Pin Shot",
-		Width:                      placement.LogicalBounds.Width,
-		Height:                     placement.LogicalBounds.Height,
-		MinWidth:                   24,
-		MinHeight:                  24,
+		Width:                      windowBounds.Width,
+		Height:                     windowBounds.Height,
+		MinWidth:                   24 + entry.shadowPadding*2,
+		MinHeight:                  24 + entry.shadowPadding*2,
 		AlwaysOnTop:                true,
 		Hidden:                     true,
 		URL:                        windowURL,
@@ -148,7 +155,7 @@ func (a *App) createFloatingCapture(
 		captureWindow.RegisterHook(events.Common.WindowClosing, func(*application.WindowEvent) {
 			a.removeFloatingCapture(id)
 		})
-		setWindowBoundsExact(captureWindow, placement.LogicalBounds)
+		setWindowBoundsExact(captureWindow, windowBounds)
 		captureWindow.SetAlwaysOnTop(true)
 		captureWindow.Show()
 		captureWindow.Focus()
@@ -241,11 +248,12 @@ func (a *App) ResetFloatingCaptureSize(id string) error {
 	}
 	current := entry.window.Bounds()
 	original := entry.originalBounds
+	originalWindow := floatingCaptureWindowBounds(original, entry.shadowPadding)
 	next := application.Rect{
-		X:      current.X + (current.Width-original.Width)/2,
-		Y:      current.Y + (current.Height-original.Height)/2,
-		Width:  original.Width,
-		Height: original.Height,
+		X:      current.X + (current.Width-originalWindow.Width)/2,
+		Y:      current.Y + (current.Height-originalWindow.Height)/2,
+		Width:  originalWindow.Width,
+		Height: originalWindow.Height,
 	}
 	setWindowBoundsExact(entry.window, next)
 	entry.window.SetAlwaysOnTop(true)
@@ -281,10 +289,32 @@ func (a *App) floatingCaptureSnapshot(id string) (*floatingCapture, error) {
 		pixelWidth:     entry.pixelWidth,
 		pixelHeight:    entry.pixelHeight,
 		originalBounds: entry.originalBounds,
+		shadowPadding:  entry.shadowPadding,
 		window:         entry.window,
 	}
 	a.floatingCaptureMu.RUnlock()
 	return snapshot, nil
+}
+
+const windowsFloatingCaptureShadowPadding = 16
+
+func floatingCaptureShadowPadding() int {
+	if runtime.GOOS == "windows" {
+		return windowsFloatingCaptureShadowPadding
+	}
+	return 0
+}
+
+func floatingCaptureWindowBounds(contentBounds application.Rect, padding int) application.Rect {
+	if padding <= 0 {
+		return contentBounds
+	}
+	return application.Rect{
+		X:      contentBounds.X - padding,
+		Y:      contentBounds.Y - padding,
+		Width:  contentBounds.Width + padding*2,
+		Height: contentBounds.Height + padding*2,
+	}
 }
 
 func (a *App) removeFloatingCapture(id string) {
