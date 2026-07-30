@@ -15,9 +15,16 @@ const (
 )
 
 var defaultMacPasteReplacementBundleIDs = []string{
+	"com.apple.Terminal",
 	"com.apple.iWork.Keynote",
 	"com.apple.iWork.Pages",
 	"com.apple.iWork.Numbers",
+}
+
+var legacyMacPasteReplacementBundleIDs = map[string]bool{
+	"com.apple.iWork.Keynote": true,
+	"com.apple.iWork.Pages":   true,
+	"com.apple.iWork.Numbers": true,
 }
 
 type Settings struct {
@@ -163,6 +170,9 @@ func NormalizeSettings(settings Settings) Settings {
 			seen[bundleID] = true
 			bundleIDs = append(bundleIDs, bundleID)
 		}
+		if runtime.GOOS == "darwin" && isLegacyMacPasteReplacementDefault(bundleIDs) {
+			bundleIDs = append([]string{"com.apple.Terminal"}, bundleIDs...)
+		}
 		settings.PasteReplacementBundleIDs = bundleIDs
 	}
 
@@ -205,6 +215,18 @@ func NormalizeSettings(settings Settings) Settings {
 	}
 
 	return settings
+}
+
+func isLegacyMacPasteReplacementDefault(bundleIDs []string) bool {
+	if len(bundleIDs) != len(legacyMacPasteReplacementBundleIDs) {
+		return false
+	}
+	for _, bundleID := range bundleIDs {
+		if !legacyMacPasteReplacementBundleIDs[bundleID] {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeProvider(provider string, goos string) string {

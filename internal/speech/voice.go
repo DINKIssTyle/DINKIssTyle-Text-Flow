@@ -6,4 +6,5 @@ type Voice struct {
 	Name     string `json:"name"`
 	Language string `json:"language"`
 	Gender   string `json:"gender"`
+	Quality  string `json:"quality,omitempty"`
 }

@@ -2,6 +2,8 @@ package ai
 
 import (
 	"encoding/json"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -35,6 +37,10 @@ func TestDefaultSettingsUseTenHistoryTurns(t *testing.T) {
 	if !settings.TTSShowAudioActions {
 		t.Fatal("synthesized audio actions must be visible by default")
 	}
+	if runtime.GOOS == "darwin" &&
+		!slices.Contains(settings.PasteReplacementBundleIDs, "com.apple.Terminal") {
+		t.Fatal("Terminal must be included in the default macOS compatibility list")
+	}
 
 	settings.HistoryCount = 0
 	if normalized := NormalizeSettings(settings); normalized.HistoryCount != 10 {
@@ -43,6 +49,24 @@ func TestDefaultSettingsUseTenHistoryTurns(t *testing.T) {
 	settings.HistoryCount = 101
 	if normalized := NormalizeSettings(settings); normalized.HistoryCount != 100 {
 		t.Fatalf("history count was not capped: %d", normalized.HistoryCount)
+	}
+}
+
+func TestNormalizeSettingsMigratesLegacyMacCompatibilityDefaults(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS compatibility defaults only apply on macOS")
+	}
+
+	settings := DefaultSettings()
+	settings.PasteReplacementBundleIDs = []string{
+		"com.apple.iWork.Keynote",
+		"com.apple.iWork.Pages",
+		"com.apple.iWork.Numbers",
+	}
+
+	normalized := NormalizeSettings(settings)
+	if !slices.Contains(normalized.PasteReplacementBundleIDs, "com.apple.Terminal") {
+		t.Fatal("legacy macOS defaults were not migrated to include Terminal")
 	}
 }
 

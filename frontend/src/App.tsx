@@ -89,6 +89,8 @@ type ScreenCaptureAttachment = {
     height: number;
 };
 
+type SettingsCategory = 'general' | 'capture' | 'ai' | 'speech';
+
 type FloatingCaptureInfo = {
     id: string;
     dataUrl: string;
@@ -391,10 +393,16 @@ type OSVoiceInfo = {
     name: string;
     language: string;
     gender: string;
+    quality?: string;
 };
 
-function osVoiceLabel(voice: OSVoiceInfo) {
-    const details = [voice.language, voice.gender].filter(Boolean);
+function osVoiceLabel(voice: OSVoiceInfo, t: Translator) {
+    const quality = voice.quality === 'premium'
+        ? t('voiceQualityPremium')
+        : voice.quality === 'enhanced'
+            ? t('voiceQualityEnhanced')
+            : '';
+    const details = [voice.language, quality, voice.gender].filter(Boolean);
     return details.length > 0 ? `${voice.name} (${details.join(', ')})` : voice.name;
 }
 
@@ -852,6 +860,7 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
     const [selectedPromptID, setSelectedPromptID] = useState('common');
     const [promptSaving, setPromptSaving] = useState(false);
     const [settingsSaving, setSettingsSaving] = useState(false);
+    const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>('general');
     const [settingsTransfer, setSettingsTransfer] = useState<'backup' | 'import' | null>(null);
     const [settingsTransferNotice, setSettingsTransferNotice] = useState('');
     const [query, setQuery] = useState('');
@@ -1917,7 +1926,7 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
             historyCount: Math.min(100, Math.max(1, Number(settings?.historyCount) || 10)),
             pasteReplacementBundleIds: Array.isArray(settings?.pasteReplacementBundleIds)
                 ? settings.pasteReplacementBundleIds.filter((bundleId: unknown) => typeof bundleId === 'string')
-                : (isMacOS ? ['com.apple.iWork.Keynote', 'com.apple.iWork.Pages', 'com.apple.iWork.Numbers'] : []),
+                : (isMacOS ? ['com.apple.Terminal', 'com.apple.iWork.Keynote', 'com.apple.iWork.Pages', 'com.apple.iWork.Numbers'] : []),
             ttsEnabled: !!settings?.ttsEnabled,
             ttsEngine: settings?.ttsEngine || 'os',
             ttsEndpoint: settings?.ttsEndpoint || 'http://localhost:7788',
@@ -2390,14 +2399,14 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
         return message || t('ocrRecognitionFailed');
     }
 
-    function speakHUDText(text: string, settings: AISettings | null) {
-        if (!text || !settings?.ttsEnabled || !settings?.ttsUseAiResponse) {
-            return;
+    function speakHUDText(text: string, settings: AISettings | null, automatic = true) {
+        if (!text || !settings?.ttsEnabled || (automatic && !settings?.ttsUseAiResponse)) {
+            return Promise.resolve();
         }
         const ttsGeneration = aiTTSGenerationRef.current + 1;
         aiTTSGenerationRef.current = ttsGeneration;
         setAITTSSynthesizing(true);
-        Speak(text)
+        return Speak(text)
             .then(() => {
                 if (
                     ttsGeneration === aiTTSGenerationRef.current &&
@@ -2510,15 +2519,21 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
         }
     }
 
-    async function replayAITTSAudio() {
-        if (!aiTTSAudioReady || aiTTSAudioAction === 'replaying' || aiTTSAudioAction === 'saving') {
+    async function playAITTSAudio() {
+        if (aiTTSAudioAction === 'replaying' || aiTTSAudioAction === 'saving') {
             return;
         }
-        const ttsGeneration = aiTTSGenerationRef.current;
         setAITTSAudioAction('replaying');
         setError('');
+        let ttsGeneration = aiTTSGenerationRef.current;
         try {
-            await ReplayLastTTSAudio();
+            if (aiTTSAudioReady) {
+                await ReplayLastTTSAudio();
+            } else {
+                const speech = speakHUDText(aiResponseText(), aiSettings, false);
+                ttsGeneration = aiTTSGenerationRef.current;
+                await speech;
+            }
         } catch (err) {
             if (ttsGeneration === aiTTSGenerationRef.current) {
                 setError(String(err));
@@ -2900,19 +2915,22 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                         </div>
                                     )}
                                     {!aiTTSSynthesizing &&
-                                        aiTTSAudioReady &&
-                                        aiSettings?.ttsShowAudioActions !== false && (
+                                        aiSettings?.ttsEnabled &&
+                                        aiSettings.ttsShowAudioActions !== false &&
+                                        !!ocrText && (
                                         <div className="hud-result-actions hud-tts-actions" role="group" aria-label={t('audioActions')}>
                                             <button
                                                 type="button"
-                                                onClick={replayAITTSAudio}
+                                                onClick={playAITTSAudio}
                                                 disabled={aiTTSAudioAction === 'replaying' || aiTTSAudioAction === 'saving'}
-                                                title={t('replayAudioTitle')}
+                                                title={aiTTSAudioReady ? t('replayAudioTitle') : t('playAudioTitle')}
                                             >
-                                                <span className="material-symbols-rounded" aria-hidden="true">replay</span>
-                                                <span>{t('replayAudio')}</span>
+                                                <span className="material-symbols-rounded" aria-hidden="true">
+                                                    {aiTTSAudioReady ? 'replay' : 'volume_up'}
+                                                </span>
+                                                <span>{aiTTSAudioReady ? t('replayAudio') : t('playAudio')}</span>
                                             </button>
-                                            <button
+                                            {aiTTSAudioReady && <button
                                                 type="button"
                                                 onClick={saveAITTSAudio}
                                                 disabled={aiTTSAudioAction === 'replaying' || aiTTSAudioAction === 'saving'}
@@ -2922,7 +2940,7 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                                     {aiTTSAudioAction === 'saved' ? 'check' : 'download'}
                                                 </span>
                                                 <span>{aiTTSAudioAction === 'saved' ? t('audioSaved') : t('saveAudio')}</span>
-                                            </button>
+                                            </button>}
                                         </div>
                                     )}
                                     {!!ocrText && (
@@ -3046,19 +3064,21 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                         </div>
                                     )}
                                     {!aiTTSSynthesizing &&
-                                        aiTTSAudioReady &&
-                                        aiSettings?.ttsShowAudioActions !== false && (
+                                        aiSettings?.ttsEnabled &&
+                                        aiSettings.ttsShowAudioActions !== false && (
                                         <div className="hud-result-actions hud-tts-actions" role="group" aria-label={t('audioActions')}>
                                             <button
                                                 type="button"
-                                                onClick={replayAITTSAudio}
+                                                onClick={playAITTSAudio}
                                                 disabled={aiTTSAudioAction === 'replaying' || aiTTSAudioAction === 'saving'}
-                                                title={t('replayAudioTitle')}
+                                                title={aiTTSAudioReady ? t('replayAudioTitle') : t('playAudioTitle')}
                                             >
-                                                <span className="material-symbols-rounded" aria-hidden="true">replay</span>
-                                                <span>{t('replayAudio')}</span>
+                                                <span className="material-symbols-rounded" aria-hidden="true">
+                                                    {aiTTSAudioReady ? 'replay' : 'volume_up'}
+                                                </span>
+                                                <span>{aiTTSAudioReady ? t('replayAudio') : t('playAudio')}</span>
                                             </button>
-                                            <button
+                                            {aiTTSAudioReady && <button
                                                 type="button"
                                                 onClick={saveAITTSAudio}
                                                 disabled={aiTTSAudioAction === 'replaying' || aiTTSAudioAction === 'saving'}
@@ -3068,7 +3088,7 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                                     {aiTTSAudioAction === 'saved' ? 'check' : 'download'}
                                                 </span>
                                                 <span>{aiTTSAudioAction === 'saved' ? t('audioSaved') : t('saveAudio')}</span>
-                                            </button>
+                                            </button>}
                                         </div>
                                     )}
                                     <div className="hud-result-actions" role="group" aria-label={t('responseActions')}>
@@ -3522,6 +3542,25 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                 </span>
                             </div>
                         </div>
+                        <nav className="settings-category-tabs" aria-label={t('settingsCategories')}>
+                            {([
+                                ['general', 'tune', t('settingsTabGeneral')],
+                                ['capture', 'screenshot_region', t('settingsTabCapture')],
+                                ['ai', 'smart_toy', t('settingsTabAi')],
+                                ['speech', 'text_to_speech', t('settingsTabSpeech')],
+                            ] as Array<[SettingsCategory, string, string]>).map(([category, icon, label]) => (
+                                <button
+                                    key={category}
+                                    className={settingsCategory === category ? 'active' : ''}
+                                    type="button"
+                                    aria-current={settingsCategory === category ? 'page' : undefined}
+                                    onClick={() => setSettingsCategory(category)}
+                                >
+                                    <span className="material-symbols-rounded" aria-hidden="true">{icon}</span>
+                                    <span>{label}</span>
+                                </button>
+                            ))}
+                        </nav>
                         {aiSettings && (
                             <form
                                 className="settings-editor"
@@ -3530,15 +3569,16 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                     void saveAllSettings();
                                 }}
                             >
-                                {generalSettings && (
+                                <div className="settings-editor-content">
+                                {generalSettings && settingsCategory === 'general' && (
                                     <section className="settings-section">
                                         <div className="panel-header compact">
-                                            <div>
-                                                <h2 className="settings-section-title">
-                                                    <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">display_settings</span>
-                                                    {t('general')}
-                                                </h2>
-                                                <p>{t('generalDescription')}</p>
+                                            <div className="settings-section-heading">
+                                                <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">display_settings</span>
+                                                <div className="settings-section-heading-copy">
+                                                    <h2 className="settings-section-title">{t('general')}</h2>
+                                                    <p>{t('generalDescription')}</p>
+                                                </div>
                                             </div>
                                         </div>
                                         <div className="settings-form-grid">
@@ -3624,15 +3664,15 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                         </div>
                                     </section>
                                 )}
-                                {generalSettings && (
+                                {generalSettings && settingsCategory === 'capture' && (
                                     <section className="settings-section pin-shot-settings">
                                         <div className="panel-header compact">
-                                            <div>
-                                                <h2 className="settings-section-title">
-                                                    <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">pinboard</span>
-                                                    {t('pinShot')}
-                                                </h2>
-                                                <p>{t('pinShotSettingsDescription')}</p>
+                                            <div className="settings-section-heading">
+                                                <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">pinboard</span>
+                                                <div className="settings-section-heading-copy">
+                                                    <h2 className="settings-section-title">{t('pinShot')}</h2>
+                                                    <p>{t('pinShotSettingsDescription')}</p>
+                                                </div>
                                             </div>
                                         </div>
                                         <div className="settings-form-grid">
@@ -3673,15 +3713,15 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                         </div>
                                     </section>
                                 )}
-                                {isMacOS && generalSettings && (
+                                {isMacOS && generalSettings && settingsCategory === 'capture' && (
                                     <section className="settings-section ocr-settings">
                                         <div className="panel-header compact">
-                                            <div>
-                                                <h2 className="settings-section-title">
-                                                    <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">document_scanner</span>
-                                                    {t('ocr')}
-                                                </h2>
-                                                <p>{t('ocrSettingsDescription')}</p>
+                                            <div className="settings-section-heading">
+                                                <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">document_scanner</span>
+                                                <div className="settings-section-heading-copy">
+                                                    <h2 className="settings-section-title">{t('ocr')}</h2>
+                                                    <p>{t('ocrSettingsDescription')}</p>
+                                                </div>
                                             </div>
                                         </div>
                                         <div className="settings-form-grid">
@@ -3745,14 +3785,14 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                         </div>
                                     </section>
                                 )}
-                                <section className="settings-section ai-settings">
+                                {settingsCategory === 'ai' && <section className="settings-section ai-settings">
                                     <div className="panel-header compact">
-                                        <div>
-                                            <h2 className="settings-section-title">
-                                                <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">smart_toy</span>
-                                                {t('aiAssistant')}
-                                            </h2>
-                                            <p>{t('aiSettingsDescription')}</p>
+                                        <div className="settings-section-heading">
+                                            <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">smart_toy</span>
+                                            <div className="settings-section-heading-copy">
+                                                <h2 className="settings-section-title">{t('aiAssistant')}</h2>
+                                                <p>{t('aiSettingsDescription')}</p>
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="check-row">
@@ -3911,14 +3951,17 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                                 ? 'aiHistoryUnavailableHint'
                                                 : 'aiHistoryHint')}
                                     </span>
+                                </section>}
+                                {settingsCategory === 'speech' && <section className="settings-section speech-settings">
                                     {isMacOS && <>
-                                        <hr className="settings-divider" />
                                         <div className="settings-section-header">
-                                            <h3 className="settings-section-title">
+                                            <div className="settings-section-heading">
                                                 <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">flag_check</span>
-                                                {t('appCompatibility')}
-                                            </h3>
-                                            <p>{t('appCompatibilityDescription')}</p>
+                                                <div className="settings-section-heading-copy">
+                                                    <h3 className="settings-section-title">{t('appCompatibility')}</h3>
+                                                    <p>{t('appCompatibilityDescription')}</p>
+                                                </div>
+                                            </div>
                                         </div>
                                         <label className="wide-setting">
                                             {t('pasteReplacementBundleIds')}
@@ -3938,15 +3981,15 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                         </label>
                                     </>}
 
-                                    <hr className="settings-divider" />
+                                    {isMacOS && <hr className="settings-divider" />}
 
                                     <div className="settings-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <div>
-                                            <h3 className="settings-section-title">
-                                                <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">text_to_speech</span>
-                                                {t('ttsSettings')}
-                                            </h3>
-                                            <p>{t('ttsSettingsDescription')}</p>
+                                        <div className="settings-section-heading">
+                                            <span className="material-symbols-rounded settings-section-icon" aria-hidden="true">text_to_speech</span>
+                                            <div className="settings-section-heading-copy">
+                                                <h3 className="settings-section-title">{t('ttsSettings')}</h3>
+                                                <p>{t('ttsSettingsDescription')}</p>
+                                            </div>
                                         </div>
                                         <button
                                             className="tts-test-playback-btn"
@@ -4053,7 +4096,7 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                                     )}
                                                     {osVoices.map((voice) => (
                                                         <option key={voice.id || voice.name} value={voice.id}>
-                                                            {osVoiceLabel(voice)}
+                                                            {osVoiceLabel(voice, t)}
                                                         </option>
                                                     ))}
                                                 </select>
@@ -4169,7 +4212,8 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                             </div>
                                         </>
                                     )}
-                                </section>
+                                </section>}
+                                </div>
                                 <div className="settings-footer-actions">
                                     <div className="settings-footer-transfer-actions">
                                         <button
