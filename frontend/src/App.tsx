@@ -37,6 +37,7 @@ import {
     ImportSnippetsAndAIPrompts,
     InsertOCRTextAtCursor,
     IsFocusedElementEditable,
+    ListAIModels,
     ListOSVoices,
     StartTTSModelDownload,
     CancelTTSModelDownload,
@@ -55,6 +56,7 @@ import {
     SaveLastTTSAudio,
     SaveApplicationSettings,
     SaveCommonAIPromptRule,
+    SendFloatingCaptureToAI,
     Speak,
     TestSpeak,
     StopSpeaking,
@@ -63,12 +65,13 @@ import {
     UpdateAIPromptProfile,
     UpdateLabel,
     UpdateSnippet,
+    UnloadAIModel,
 } from "../bindings/dkst-text-flow/internal/app/app";
 import { Application, Clipboard, Events, System, Window } from "@wailsio/runtime";
 
 import { Snippet, SnippetInput, Label, LabelInput, DashboardStats, DailyTypingStat } from "../bindings/dkst-text-flow/internal/storage/models";
 import { AppInfo, Status as PlatformStatus } from "../bindings/dkst-text-flow/internal/platform/models";
-import { Settings as AISettings } from "../bindings/dkst-text-flow/internal/ai/models";
+import { ModelInfo as AIModelInfo, Settings as AISettings } from "../bindings/dkst-text-flow/internal/ai/models";
 import { GeneralSettings, AIPromptRule, AIPromptProfile, AIPromptProfileInput, AIPromptSettings } from "../bindings/dkst-text-flow/internal/app/models";
 
 type AIInvocationContext = {
@@ -80,6 +83,10 @@ type AIInvocationContext = {
     appName: string;
     appBundleId: string;
     isEditable?: boolean;
+    screenshotDataUrl?: string;
+    screenshotMimeType?: string;
+    screenshotWidth?: number;
+    screenshotHeight?: number;
 };
 
 type ScreenCaptureAttachment = {
@@ -640,7 +647,10 @@ function FloatingCaptureWindow({
     const [opacity, setOpacity] = useState(1);
     const [status, setStatus] = useState('');
     const [error, setError] = useState('');
+    const [aiAssistantEnabled, setAIAssistantEnabled] = useState(false);
+    const [toolbarSizeConstrained, setToolbarSizeConstrained] = useState(false);
     const statusTimerRef = useRef<number | null>(null);
+    const toolbarRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         document.documentElement.classList.add('floating-capture-mode');
@@ -661,6 +671,54 @@ function FloatingCaptureWindow({
             })
             .catch((err) => setError(String(err)));
     }, [captureID]);
+
+    useEffect(() => {
+        let mounted = true;
+        const updateAIAvailability = (settings: AISettings) => {
+            if (mounted) {
+                setAIAssistantEnabled(settings.enabled === true);
+            }
+        };
+        const cancel = Events.On('ai:settings-updated', (event) => {
+            updateAIAvailability(event.data as AISettings);
+        });
+        GetAISettings()
+            .then(updateAIAvailability)
+            .catch(() => {
+                if (mounted) {
+                    setAIAssistantEnabled(false);
+                }
+            });
+        return () => {
+            mounted = false;
+            cancel();
+        };
+    }, []);
+
+    useEffect(() => {
+        const toolbar = toolbarRef.current;
+        if (!toolbar) {
+            return;
+        }
+        const updateToolbarVisibility = () => {
+            const horizontalClearance = 24;
+            const verticalClearance = 24;
+            const contentWidth = Math.max(0, window.innerWidth - shadowPadding * 2);
+            const contentHeight = Math.max(0, window.innerHeight - shadowPadding * 2);
+            setToolbarSizeConstrained(
+                contentWidth <= toolbar.offsetWidth + horizontalClearance ||
+                contentHeight <= toolbar.offsetHeight + verticalClearance,
+            );
+        };
+        updateToolbarVisibility();
+        const resizeObserver = new ResizeObserver(updateToolbarVisibility);
+        resizeObserver.observe(document.documentElement);
+        window.addEventListener('resize', updateToolbarVisibility);
+        return () => {
+            resizeObserver.disconnect();
+            window.removeEventListener('resize', updateToolbarVisibility);
+        };
+    }, [aiAssistantEnabled, shadowPadding]);
 
     function showStatus(message: string) {
         setStatus(message);
@@ -718,6 +776,15 @@ function FloatingCaptureWindow({
         }
     }
 
+    async function sendCaptureToAI() {
+        try {
+            await SendFloatingCaptureToAI(captureID);
+            showStatus('Sent to Ask AI');
+        } catch (err) {
+            setError(String(err));
+        }
+    }
+
     useEffect(() => {
         const handleShortcut = (event: globalThis.KeyboardEvent) => {
             if ((!event.metaKey && !event.ctrlKey) || event.altKey || event.shiftKey) {
@@ -760,7 +827,13 @@ function FloatingCaptureWindow({
                     style={{ opacity }}
                 />
             )}
-            <div className="floating-capture-toolbar" role="toolbar" aria-label="Pin Shot">
+            <div
+                ref={toolbarRef}
+                className={`floating-capture-toolbar${toolbarSizeConstrained ? ' is-size-constrained' : ''}`}
+                role="toolbar"
+                aria-label="Pin Shot"
+                aria-hidden={toolbarSizeConstrained}
+            >
                 <button type="button" onClick={saveCapture} title="Save (⌘/Ctrl+S)" aria-label="Save">
                     <span className="material-symbols-rounded" aria-hidden="true">save</span>
                 </button>
@@ -770,6 +843,11 @@ function FloatingCaptureWindow({
                 <button type="button" onClick={resetCaptureSize} title="Reset to 100%" aria-label="Reset to 100%">
                     <span className="floating-capture-reset-label" aria-hidden="true">1:1</span>
                 </button>
+                {aiAssistantEnabled && (
+                    <button type="button" onClick={sendCaptureToAI} title="Send to Ask AI" aria-label="Send to Ask AI">
+                        <span className="material-symbols-rounded" aria-hidden="true">smart_toy</span>
+                    </button>
+                )}
                 <button
                     type="button"
                     onClick={() => CloseFloatingCapture(captureID)}
@@ -871,6 +949,11 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
     const [runningApps, setRunningApps] = useState<AppInfo[]>([]);
     const [runningAppsLoading, setRunningAppsLoading] = useState(false);
     const [selectedRunningAppBundleID, setSelectedRunningAppBundleID] = useState('');
+    const [modelPickerOpen, setModelPickerOpen] = useState(false);
+    const [availableAIModels, setAvailableAIModels] = useState<AIModelInfo[]>([]);
+    const [aiModelsLoading, setAIModelsLoading] = useState(false);
+    const [aiModelsError, setAIModelsError] = useState('');
+    const [unmountingModelInstanceID, setUnmountingModelInstanceID] = useState('');
     const [requestingPermission, setRequestingPermission] = useState<'accessibility' | 'screenRecording' | null>(null);
     const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
     const [form, setForm] = useState<SnippetInput>(emptyInput);
@@ -1258,6 +1341,15 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                 appBundleId: context?.appBundleId || '',
                 isEditable: context?.isEditable ?? false,
             });
+            if (context?.screenshotDataUrl) {
+                aiHUDGrowUpRef.current = true;
+                setAIScreenshot({
+                    dataUrl: context.screenshotDataUrl,
+                    mimeType: context.screenshotMimeType || 'image/png',
+                    width: context.screenshotWidth || 1,
+                    height: context.screenshotHeight || 1,
+                });
+            }
             const focusGeneration = ++aiFocusGenerationRef.current;
             window.setTimeout(() => {
                 focusAIPromptInput(focusGeneration);
@@ -2095,6 +2187,75 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
         setRunningApps([]);
         setSelectedRunningAppBundleID('');
         setRunningAppsLoading(false);
+    }
+
+    async function refreshAIModels() {
+        if (!aiSettings || aiSettings.provider === 'apple_intelligence') {
+            return;
+        }
+        setAIModelsLoading(true);
+        setAIModelsError('');
+        try {
+            const models = await ListAIModels(
+                aiSettings.provider,
+                aiSettings.endpoint,
+                aiSettings.apiKey,
+            );
+            setAvailableAIModels((models || []) as AIModelInfo[]);
+        } catch (err) {
+            setAvailableAIModels([]);
+            const message = String(err || '').replace(/^RuntimeError:\s*/i, '').trim();
+            setAIModelsError(message || t('modelListFailed'));
+        } finally {
+            setAIModelsLoading(false);
+        }
+    }
+
+    function openModelPicker() {
+        setModelPickerOpen(true);
+        setAvailableAIModels([]);
+        setAIModelsError('');
+        setUnmountingModelInstanceID('');
+        void refreshAIModels();
+    }
+
+    function closeModelPicker() {
+        if (unmountingModelInstanceID) {
+            return;
+        }
+        setModelPickerOpen(false);
+        setAIModelsError('');
+    }
+
+    function selectAIModel(model: AIModelInfo) {
+        if (!aiSettings) {
+            return;
+        }
+        setAISettings({ ...aiSettings, model: model.id });
+        closeModelPicker();
+    }
+
+    async function unmountAIModel(model: AIModelInfo) {
+        if (!aiSettings || !model.instanceId || unmountingModelInstanceID) {
+            return;
+        }
+        setUnmountingModelInstanceID(model.instanceId);
+        setAIModelsError('');
+        try {
+            await UnloadAIModel(
+                aiSettings.provider,
+                aiSettings.endpoint,
+                aiSettings.apiKey,
+                model.instanceId,
+            );
+            showSaveToast(t('modelUnmounted'));
+            await refreshAIModels();
+        } catch (err) {
+            const message = String(err || '').replace(/^RuntimeError:\s*/i, '').trim();
+            setAIModelsError(message || t('modelListFailed'));
+        } finally {
+            setUnmountingModelInstanceID('');
+        }
     }
 
     async function createPromptProfile(appInfo: AppInfo) {
@@ -3857,11 +4018,21 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                                                 </label>
                                                 <label>
                                                     {t('model')}
-                                                    <input
-                                                        value={aiSettings.model}
-                                                        onChange={(event) => setAISettings({ ...aiSettings, model: event.target.value })}
-                                                        placeholder={t('modelPlaceholder')}
-                                                    />
+                                                    <span className="model-setting-control">
+                                                        <input
+                                                            value={aiSettings.model}
+                                                            onChange={(event) => setAISettings({ ...aiSettings, model: event.target.value })}
+                                                            placeholder={t('modelPlaceholder')}
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={openModelPicker}
+                                                            aria-label={t('chooseModel')}
+                                                            title={t('chooseModel')}
+                                                        >
+                                                            <span className="material-symbols-rounded" aria-hidden="true">view_list</span>
+                                                        </button>
+                                                    </span>
                                                 </label>
                                             </div>
                                             <div className="settings-form-grid">
@@ -4356,6 +4527,112 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                             <div className="modal-actions app-picker-actions">
                                 <button type="button" onClick={closeAppPicker}>{t('cancel')}</button>
                             </div>
+                        )}
+                    </section>
+                </div>
+            )}
+
+            {modelPickerOpen && aiSettings && aiSettings.provider !== 'apple_intelligence' && (
+                <div
+                    className="modal-backdrop model-picker-backdrop"
+                    onClick={(event) => {
+                        if (event.currentTarget === event.target) {
+                            closeModelPicker();
+                        }
+                    }}
+                >
+                    <section
+                        className="modal model-picker-modal"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="model-picker-title"
+                        aria-describedby="model-picker-description"
+                    >
+                        <div className="model-picker-header">
+                            <div>
+                                <h2 id="model-picker-title">{t('modelPickerTitle')}</h2>
+                                <p id="model-picker-description">{t('modelPickerDescription')}</p>
+                            </div>
+                            <div className="model-picker-header-actions">
+                                <button
+                                    type="button"
+                                    onClick={() => void refreshAIModels()}
+                                    disabled={aiModelsLoading || !!unmountingModelInstanceID}
+                                    aria-label={t('refreshModels')}
+                                    title={t('refreshModels')}
+                                >
+                                    <span className="material-symbols-rounded" aria-hidden="true">refresh</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={closeModelPicker}
+                                    disabled={!!unmountingModelInstanceID}
+                                    aria-label={t('close')}
+                                    title={t('close')}
+                                >
+                                    <span className="material-symbols-rounded" aria-hidden="true">close</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div className="ai-model-list" role="listbox" aria-label={t('modelPickerTitle')}>
+                            {aiModelsLoading && availableAIModels.length === 0 ? (
+                                <div className="ai-model-list-state">
+                                    <span className="button-spinner" aria-hidden="true" />
+                                    <span>{t('loadingModels')}</span>
+                                </div>
+                            ) : aiModelsError && availableAIModels.length === 0 ? (
+                                <div className="ai-model-list-state is-error">
+                                    <span className="material-symbols-rounded" aria-hidden="true">error</span>
+                                    <span>{aiModelsError}</span>
+                                </div>
+                            ) : availableAIModels.length === 0 ? (
+                                <div className="ai-model-list-state">{t('noModelsAvailable')}</div>
+                            ) : availableAIModels.map((model) => {
+                                const selected = model.id === aiSettings.model;
+                                const unmounting = model.instanceId === unmountingModelInstanceID;
+                                return (
+                                    <div
+                                        key={model.id}
+                                        className={`ai-model-row${selected ? ' selected' : ''}`}
+                                    >
+                                        <button
+                                            className="ai-model-select"
+                                            type="button"
+                                            role="option"
+                                            aria-selected={selected}
+                                            disabled={!!unmountingModelInstanceID}
+                                            onClick={() => selectAIModel(model)}
+                                        >
+                                            <span className="ai-model-copy">
+                                                <strong>{model.displayName || model.id}</strong>
+                                                <span className="ai-model-meta">
+                                                    {model.loaded && <span className="ai-model-loaded">{t('loadedModel')}</span>}
+                                                    {(selected || model.displayName !== model.id) && <span>{model.id}</span>}
+                                                </span>
+                                            </span>
+                                        </button>
+                                        {model.loaded && model.instanceId && (
+                                            <button
+                                                className="ai-model-unmount"
+                                                type="button"
+                                                disabled={!!unmountingModelInstanceID}
+                                                onClick={() => void unmountAIModel(model)}
+                                                aria-label={unmounting ? t('unmountingModel') : t('unmountModel')}
+                                                title={unmounting ? t('unmountingModel') : t('unmountModel')}
+                                            >
+                                                {unmounting ? (
+                                                    <span className="button-spinner" aria-hidden="true" />
+                                                ) : (
+                                                    <span className="material-symbols-rounded" aria-hidden="true">eject</span>
+                                                )}
+                                            </button>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        {aiModelsError && availableAIModels.length > 0 && (
+                            <div className="model-picker-inline-error" role="alert">{aiModelsError}</div>
                         )}
                     </section>
                 </div>

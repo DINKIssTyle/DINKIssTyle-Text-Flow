@@ -594,7 +594,7 @@ button:not(:disabled):focus-visible {
 .floating-capture-toolbar {
     position: absolute;
     z-index: 3;
-    top: 7px;
+    bottom: 7px;
     left: 50%;
     display: flex;
     align-items: center;
@@ -605,10 +605,14 @@ button:not(:disabled):focus-visible {
     background: rgba(16, 20, 27, 0.78);
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.32);
     opacity: 0;
-    transform: translate(-50%, -4px);
+    transform: translate(-50%, 4px);
     transition: opacity 120ms ease, transform 120ms ease;
     pointer-events: none;
     --wails-draggable: no-drag;
+}
+
+.floating-capture-toolbar.is-size-constrained {
+    visibility: hidden;
 }
 
 .floating-capture-surface:hover .floating-capture-toolbar,
@@ -668,12 +672,12 @@ button:not(:disabled):focus-visible {
 }
 
 .floating-capture-status {
-    bottom: 8px;
+    top: 8px;
 }
 
 .floating-capture-error {
     right: 8px;
-    bottom: 8px;
+    top: 8px;
     left: 8px;
     overflow: hidden;
     border: 1px solid rgba(255, 160, 160, 0.55);
@@ -2232,6 +2236,183 @@ h2 {
     place-items: center;
 }
 
+.model-picker-backdrop {
+    z-index: 22;
+    place-items: center;
+}
+
+.model-picker-modal {
+    width: min(600px, 100%);
+    max-height: min(680px, calc(100vh - 36px));
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 16px;
+    padding: 20px;
+}
+
+.model-picker-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.model-picker-header h2 {
+    margin: 2px 0 4px;
+}
+
+.model-picker-header p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.model-picker-header-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.model-picker-header-actions button,
+.ai-model-unmount {
+    display: inline-grid;
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+    place-items: center;
+    padding: 0;
+}
+
+.model-picker-header-actions .material-symbols-rounded,
+.ai-model-unmount .material-symbols-rounded {
+    font-size: 19px;
+}
+
+.ai-model-list {
+    min-height: 240px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel-bg);
+}
+
+.ai-model-list-state {
+    display: flex;
+    min-height: 240px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 20px;
+    box-sizing: border-box;
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+}
+
+.ai-model-list-state.is-error,
+.model-picker-inline-error {
+    color: var(--danger);
+}
+
+.ai-model-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    min-height: 66px;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+}
+
+.ai-model-row:last-child {
+    border-bottom: 0;
+}
+
+.ai-model-row:nth-child(even) {
+    background: color-mix(in srgb, var(--subtle-bg) 75%, transparent);
+}
+
+.ai-model-row:hover,
+.ai-model-row.selected {
+    background: var(--active-bg);
+}
+
+.ai-model-row.selected {
+    box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.ai-model-select {
+    display: block;
+    min-width: 0;
+    min-height: 66px;
+    padding: 10px 14px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    text-align: left;
+}
+
+.ai-model-select:not(:disabled):hover,
+.ai-model-select:not(:disabled):focus-visible {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.ai-model-copy {
+    display: grid;
+    min-width: 0;
+    gap: 5px;
+}
+
+.ai-model-copy strong,
+.ai-model-meta > span:not(.ai-model-loaded) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ai-model-copy strong {
+    color: var(--text);
+    font-size: 14px;
+}
+
+.ai-model-meta {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.ai-model-loaded {
+    flex: 0 0 auto;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--good) 18%, transparent);
+    color: var(--good);
+    font-weight: 700;
+}
+
+.ai-model-unmount {
+    margin-right: 12px;
+    border-color: transparent;
+    background: transparent;
+    color: var(--muted);
+}
+
+.ai-model-unmount:not(:disabled):hover,
+.ai-model-unmount:not(:disabled):focus-visible {
+    border-color: transparent;
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+    color: var(--danger);
+    box-shadow: none;
+}
+
+.model-picker-inline-error {
+    padding: 0 2px;
+    font-size: 11px;
+}
+
 .app-picker-modal {
     width: min(600px, 100%);
     max-height: min(620px, calc(100vh - 36px));
@@ -2527,6 +2708,7 @@ h2 {
 }
 
 .app-picker-modal,
+.model-picker-modal,
 .permission-modal,
 .snippet-modal {
     animation: modal-content-fade 0.14s ease-out both;
@@ -2561,6 +2743,7 @@ h2 {
 
     .modal-backdrop,
     .app-picker-modal,
+    .model-picker-modal,
     .permission-modal,
     .snippet-modal,
     .button-spinner,
@@ -2700,6 +2883,25 @@ h2 {
 
 .settings-form-grid .hotkey-capture {
     min-width: 0;
+}
+
+.model-setting-control {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr) 30px;
+    gap: 6px;
+}
+
+.settings-form-grid .model-setting-control button {
+    display: inline-grid;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+    padding: 0;
+}
+
+.model-setting-control .material-symbols-rounded {
+    font-size: 18px;
 }
 
 .apple-intelligence-status-card {

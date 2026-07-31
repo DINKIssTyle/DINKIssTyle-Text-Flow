@@ -37,6 +37,16 @@ export enum ContextKind {
     ContextSelectedFile = "selected_file",
 };
 
+/**
+ * ModelInfo is the normalized model metadata used by the settings model picker.
+ */
+export interface ModelInfo {
+    "id": string;
+    "displayName": string;
+    "loaded": boolean;
+    "instanceId"?: string;
+}
+
 export interface Settings {
     "enabled": boolean;
     "provider": string;

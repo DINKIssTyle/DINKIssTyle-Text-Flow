@@ -65,14 +65,18 @@ const (
 )
 
 type InvocationContext struct {
-	Kind            ContextKind `json:"kind"`
-	Text            string      `json:"text"`
-	FilePath        string      `json:"filePath"`
-	Label           string      `json:"label"`
-	SourceProcessID int         `json:"sourceProcessId"`
-	AppName         string      `json:"appName"`
-	AppBundleID     string      `json:"appBundleId"`
-	IsEditable      bool        `json:"isEditable"`
+	Kind               ContextKind `json:"kind"`
+	Text               string      `json:"text"`
+	FilePath           string      `json:"filePath"`
+	Label              string      `json:"label"`
+	SourceProcessID    int         `json:"sourceProcessId"`
+	AppName            string      `json:"appName"`
+	AppBundleID        string      `json:"appBundleId"`
+	IsEditable         bool        `json:"isEditable"`
+	ScreenshotDataURL  string      `json:"screenshotDataUrl,omitempty"`
+	ScreenshotMimeType string      `json:"screenshotMimeType,omitempty"`
+	ScreenshotWidth    int         `json:"screenshotWidth,omitempty"`
+	ScreenshotHeight   int         `json:"screenshotHeight,omitempty"`
 }
 
 type AssistRequest struct {

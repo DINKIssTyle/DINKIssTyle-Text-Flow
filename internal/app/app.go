@@ -1073,6 +1073,14 @@ func (a *App) handleAIHotkey(sourceProcessID int) {
 }
 
 func (a *App) showAIPrompt(sourceProcessID int, requireEnabled bool) {
+	a.showAIPromptWithScreenshot(sourceProcessID, requireEnabled, nil)
+}
+
+func (a *App) showAIPromptWithScreenshot(
+	sourceProcessID int,
+	requireEnabled bool,
+	screenshot *platform.ScreenCaptureResult,
+) {
 	if a.isFlowPaused() {
 		return
 	}
@@ -1085,13 +1093,23 @@ func (a *App) showAIPrompt(sourceProcessID int, requireEnabled bool) {
 		Kind:            ai.ContextNone,
 		Label:           "No Context",
 		SourceProcessID: sourceProcessID,
-		IsEditable:      platform.IsFocusedElementEditableForProcess(sourceProcessID),
+		IsEditable: sourceProcessID > 0 &&
+			platform.IsFocusedElementEditableForProcess(sourceProcessID),
 	}
-	appInfo := platform.AppInfoFromProcess(sourceProcessID)
-	invocation.AppName = appInfo.Name
-	invocation.AppBundleID = appInfo.BundleID
+	appInfo := platform.AppInfo{}
+	if sourceProcessID > 0 {
+		appInfo = platform.AppInfoFromProcess(sourceProcessID)
+		invocation.AppName = appInfo.Name
+		invocation.AppBundleID = appInfo.BundleID
+	}
+	if screenshot != nil {
+		invocation.ScreenshotDataURL = screenshot.DataURL
+		invocation.ScreenshotMimeType = screenshot.MimeType
+		invocation.ScreenshotWidth = screenshot.Width
+		invocation.ScreenshotHeight = screenshot.Height
+	}
 	rule := a.aiPromptRuleForBundleID(appInfo.BundleID)
-	if settings.UseSelectedText && rule.UseSelectedText {
+	if sourceProcessID > 0 && settings.UseSelectedText && rule.UseSelectedText {
 		if selected, err := platform.SelectedTextFromProcess(sourceProcessID); err == nil && strings.TrimSpace(selected) != "" {
 			invocation.Kind = ai.ContextSelectedText
 			invocation.Text = selected

@@ -238,6 +238,37 @@ func (a *App) CopyFloatingCapture(id string) error {
 	return nil
 }
 
+// SendFloatingCaptureToAI opens the AI HUD with the Pin Shot attached as
+// screenshot context. The Pin Shot stays open so it can still be referenced.
+func (a *App) SendFloatingCaptureToAI(id string) error {
+	entry, err := a.floatingCaptureSnapshot(id)
+	if err != nil {
+		return err
+	}
+	if a.isFlowPaused() {
+		return errors.New("Flow is paused")
+	}
+	settings, err := a.GetAISettings()
+	if err != nil {
+		return err
+	}
+	if !settings.Enabled {
+		return errors.New("AI assistant is disabled")
+	}
+
+	appInst := application.Get()
+	if appInst == nil {
+		return errors.New("application is unavailable")
+	}
+	a.showAIPromptWithScreenshot(0, false, &platform.ScreenCaptureResult{
+		DataURL:  entry.dataURL,
+		MimeType: "image/png",
+		Width:    entry.pixelWidth,
+		Height:   entry.pixelHeight,
+	})
+	return nil
+}
+
 func (a *App) ResetFloatingCaptureSize(id string) error {
 	entry, err := a.floatingCaptureSnapshot(id)
 	if err != nil {

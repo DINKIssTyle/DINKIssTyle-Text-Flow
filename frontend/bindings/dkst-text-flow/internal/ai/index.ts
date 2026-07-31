@@ -9,6 +9,7 @@ export type {
     AppleIntelligenceStatus,
     AssistRequest,
     AssistResult,
+    ModelInfo,
     Settings,
     TTSModelStatus
 } from "./models.js";
