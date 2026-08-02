@@ -4,11 +4,11 @@ go 1.25.0
 
 require (
 	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018
-	github.com/mattn/go-sqlite3 v1.14.44
-	github.com/wailsapp/wails/v3 v3.0.0-alpha2.117
+	github.com/mattn/go-sqlite3 v1.14.49
+	github.com/wailsapp/wails/v3 v3.0.0-alpha2.122
 	github.com/yalue/onnxruntime_go v1.11.0
-	golang.org/x/sys v0.43.0
-	golang.org/x/text v0.37.0
+	golang.org/x/sys v0.47.0
+	golang.org/x/text v0.40.0
 )
 
 require (
