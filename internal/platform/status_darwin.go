@@ -4,10 +4,11 @@ package platform
 
 /*
 #cgo darwin CFLAGS: -x objective-c
-#cgo darwin LDFLAGS: -framework ApplicationServices -framework AppKit -framework UniformTypeIdentifiers
+#cgo darwin LDFLAGS: -framework ApplicationServices -framework AppKit -framework UniformTypeIdentifiers -framework Carbon
 #import <ApplicationServices/ApplicationServices.h>
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
+#import <Carbon/Carbon.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -782,7 +783,7 @@ func CurrentStatus() Status {
 	return Status{
 		AccessibilityTrusted:   trusted,
 		ScreenRecordingGranted: C.DKSTScreenRecordingGranted() == 1,
-		SecureInputActive:      false,
+		SecureInputActive:      C.IsSecureEventInputEnabled() != 0,
 		ActiveAppName:          name,
 		ActiveBundleID:         bundleID,
 		FlowEngineRunning:      false,

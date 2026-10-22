@@ -7,6 +7,7 @@ package flowengine
 #cgo darwin LDFLAGS: -framework ApplicationServices -framework Cocoa -framework Carbon
 
 int DKSTStartKeyboardTap(void);
+int DKSTKeyboardTapRunning(void);
 void DKSTStopKeyboardTap(void);
 void DKSTPostBackspaces(int count);
 void DKSTPostKey(int keyCode);
@@ -45,9 +46,20 @@ type engine struct {
 	typingCount   int64
 	typingFlush   bool
 	generation    uint64
+	events        chan keyboardInput
+	workerOnce    sync.Once
 }
 
-var keyboardEngine = &engine{matcher: flow.NewMatcher(96)}
+type keyboardInput struct {
+	text       string
+	backspace  bool
+	generation uint64
+}
+
+var keyboardEngine = &engine{
+	matcher: flow.NewMatcher(96),
+	events:  make(chan keyboardInput, 256),
+}
 
 func SetExpansionHandler(handler func(storage.Snippet)) {
 	keyboardEngine.mu.Lock()
@@ -58,38 +70,46 @@ func SetExpansionHandler(handler func(storage.Snippet)) {
 func Start(store Store) bool {
 	keyboardEngine.mu.Lock()
 	keyboardEngine.store = store
-	keyboardEngine.matcher.Reset()
-	if keyboardEngine.running {
-		keyboardEngine.mu.Unlock()
-		return true
-	}
 	keyboardEngine.mu.Unlock()
+	keyboardEngine.workerOnce.Do(func() {
+		go keyboardEngine.processKeyboardEvents()
+	})
 
 	started := C.DKSTStartKeyboardTap() == 1
 	keyboardEngine.mu.Lock()
-	keyboardEngine.running = started
-	if started {
+	if keyboardEngine.running != started {
 		keyboardEngine.generation++
+		keyboardEngine.matcher.Reset()
 	}
+	keyboardEngine.running = started
 	keyboardEngine.mu.Unlock()
 	return started
 }
 
 func Stop() {
-	C.DKSTStopKeyboardTap()
-	flushTypingCount()
+	// Cancel queued and in-flight work before tearing down the native tap.
 	keyboardEngine.mu.Lock()
 	keyboardEngine.running = false
 	keyboardEngine.generation++
 	keyboardEngine.matcher.Reset()
-	keyboardEngine.suppressInput = false
 	keyboardEngine.mu.Unlock()
+	C.DKSTStopKeyboardTap()
+	keyboardEngine.flushTypingCount()
 }
 
 func Running() bool {
-	keyboardEngine.mu.Lock()
-	defer keyboardEngine.mu.Unlock()
-	return keyboardEngine.running
+	return keyboardEngine.updateRunningState(C.DKSTKeyboardTapRunning() == 1)
+}
+
+func (e *engine) updateRunningState(tapRunning bool) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.running && !tapRunning {
+		e.running = false
+		e.generation++
+		e.matcher.Reset()
+	}
+	return e.running
 }
 
 // InvalidatePendingExpansion prevents a match captured before a snippet
@@ -103,108 +123,139 @@ func InvalidatePendingExpansion() {
 
 //export DKSTKeyboardInput
 func DKSTKeyboardInput(value *C.char, backspace C.int) {
-	keyboardEngine.mu.Lock()
-	if keyboardEngine.suppressInput || !keyboardEngine.running {
-		keyboardEngine.mu.Unlock()
+	keyboardEngine.enqueueKeyboardInput(keyboardInput{
+		text: C.GoString(value), backspace: backspace == 1,
+	})
+}
+
+// The event-tap callback must never wait for storage, clipboard access or output.
+func (e *engine) enqueueKeyboardInput(input keyboardInput) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.suppressInput || !e.running {
 		return
 	}
-	store := keyboardEngine.store
-	matcher := keyboardEngine.matcher
-	generation := keyboardEngine.generation
-	keyboardEngine.mu.Unlock()
+	input.generation = e.generation
+	select {
+	case e.events <- input:
+	default:
+		// A missing key makes both the buffer and all queued matches unreliable.
+		e.generation++
+		e.matcher.Reset()
+	}
+}
+
+func (e *engine) processKeyboardEvents() {
+	for input := range e.events {
+		e.handleKeyboardInput(input)
+	}
+}
+
+func (e *engine) handleKeyboardInput(input keyboardInput) {
+	e.mu.Lock()
+	if e.suppressInput || !e.running || input.generation != e.generation {
+		e.mu.Unlock()
+		return
+	}
+	store := e.store
 	if store == nil {
+		e.mu.Unlock()
 		return
 	}
-
-	if backspace == 1 {
-		recordTyping(store, 1)
-		keyboardEngine.mu.Lock()
-		matcher.Backspace()
-		keyboardEngine.mu.Unlock()
+	if input.backspace {
+		e.matcher.Backspace()
+		e.mu.Unlock()
+		e.recordTyping(store, 1)
 		return
 	}
-
-	text := C.GoString(value)
+	text := input.text
 	if text == "" {
+		e.mu.Unlock()
 		return
 	}
-	recordTyping(store, 1)
-
-	delimiterTyped := flow.IsDelimiter(text)
-	keyboardEngine.mu.Lock()
-	matcher.Push(text)
-	buffer := matcher.Buffer()
-	keyboardEngine.mu.Unlock()
+	e.matcher.Push(text)
+	buffer := e.matcher.Buffer()
+	e.mu.Unlock()
+	e.recordTyping(store, 1)
 
 	snippets, err := store.ListSnippets("")
 	if err != nil {
 		return
 	}
 
-	keyboardEngine.mu.Lock()
-	match, ok := matcher.Find(snippets, delimiterTyped)
-	if ok {
-		matcher.Reset()
+	e.mu.Lock()
+	// Stop, restart, deletion and queue overflow can invalidate a pending lookup.
+	if !e.running || input.generation != e.generation {
+		e.mu.Unlock()
+		return
 	}
-	keyboardEngine.mu.Unlock()
+	match, ok := e.matcher.Find(snippets, flow.IsDelimiter(text))
+	if ok {
+		e.matcher.Reset()
+		e.suppressInput = true
+	}
+	e.mu.Unlock()
 	if !ok {
 		return
 	}
+	defer func() {
+		e.mu.Lock()
+		e.suppressInput = false
+		e.mu.Unlock()
+	}()
 
-	if !executionActive(generation) {
-		return
-	}
-	deleteKeys := deleteKeysForMatch(buffer, text, match.Snippet.Shortcut, match.Snippet.CaseSensitive, delimiterTyped)
+	deleteKeys := deleteKeysForMatch(buffer, text, match.Snippet.Shortcut, match.Snippet.CaseSensitive, match.ConsumedDelimiter)
 	deleteCount := shortcutDeleteCount(deleteKeys)
-	if delimiterTyped && strings.HasSuffix(buffer, text) {
+	if match.ConsumedDelimiter && strings.HasSuffix(buffer, text) {
 		deleteCount += len([]rune(text))
 	}
-
-	if !executionActive(generation) {
+	if !e.executionActive(input.generation) {
 		return
 	}
 	C.DKSTPostBackspaces(C.int(deleteCount))
 	time.Sleep(backspaceSettleDuration(deleteCount))
-	if !executeSnippetActions(renderSnippetActions(match.Snippet.Content), match.Snippet.UsePaste, generation) {
+	if !e.executeSnippetActions(renderSnippetActions(match.Snippet.Content), match.Snippet.UsePaste, input.generation) {
 		return
 	}
-	keyboardEngine.mu.Lock()
-	onExpansion := keyboardEngine.onExpansion
-	keyboardEngine.mu.Unlock()
+	e.mu.Lock()
+	// Usage logging must not extend the interval in which real input is ignored.
+	e.suppressInput = false
+	onExpansion := e.onExpansion
+	e.mu.Unlock()
 	if onExpansion != nil {
 		onExpansion(match.Snippet)
 	}
 	_ = store.LogExpansion(match.Snippet.ID, "")
 }
 
-func recordTyping(store Store, count int64) {
+func (e *engine) recordTyping(store Store, count int64) {
 	if store == nil || count <= 0 {
 		return
 	}
 
 	var shouldFlush bool
-	keyboardEngine.mu.Lock()
-	keyboardEngine.typingCount += count
-	if keyboardEngine.typingCount >= 25 {
+	e.mu.Lock()
+	e.typingCount += count
+	if e.typingCount >= 25 {
 		shouldFlush = true
-	} else if !keyboardEngine.typingFlush {
-		keyboardEngine.typingFlush = true
-		time.AfterFunc(1200*time.Millisecond, flushTypingCount)
+	} else if !e.typingFlush {
+		e.typingFlush = true
+		time.AfterFunc(1200*time.Millisecond, e.flushTypingCount)
 	}
-	keyboardEngine.mu.Unlock()
+	e.mu.Unlock()
 
 	if shouldFlush {
-		go flushTypingCount()
+		go e.flushTypingCount()
 	}
 }
 
-func flushTypingCount() {
-	keyboardEngine.mu.Lock()
-	store := keyboardEngine.store
-	count := keyboardEngine.typingCount
-	keyboardEngine.typingCount = 0
-	keyboardEngine.typingFlush = false
-	keyboardEngine.mu.Unlock()
+func (e *engine) flushTypingCount() {
+	e.mu.Lock()
+	store := e.store
+	count := e.typingCount
+	e.typingCount = 0
+	e.typingFlush = false
+	e.mu.Unlock()
 
 	if store == nil || count <= 0 {
 		return
@@ -292,33 +343,31 @@ type snippetAction struct {
 
 var snippetTagPattern = regexp.MustCompile(`\{\{([^{}]+)\}\}`)
 
-func executeSnippetActions(actions []snippetAction, usePaste bool, generation uint64) bool {
-	if !executionActive(generation) {
-		return false
-	}
-	keyboardEngine.mu.Lock()
-	keyboardEngine.suppressInput = true
-	keyboardEngine.mu.Unlock()
-	defer func() {
-		keyboardEngine.mu.Lock()
-		keyboardEngine.suppressInput = false
-		keyboardEngine.mu.Unlock()
-	}()
-
+func (e *engine) executeSnippetActions(actions []snippetAction, usePaste bool, generation uint64) bool {
 	for _, action := range actions {
-		if !executionActive(generation) {
+		if !e.executionActive(generation) {
 			return false
 		}
 		if action.text != "" {
-			text := C.CString(action.text)
 			if usePaste {
+				text := C.CString(action.text)
 				C.DKSTPasteText(text)
+				C.free(unsafe.Pointer(text))
 				time.Sleep(24 * time.Millisecond)
 			} else {
-				C.DKSTTypeText(text)
+				// Bound native calls so pausing also cancels a long text action.
+				runes := []rune(action.text)
+				for start := 0; start < len(runes); start += 32 {
+					if !e.executionActive(generation) {
+						return false
+					}
+					end := min(start+32, len(runes))
+					text := C.CString(string(runes[start:end]))
+					C.DKSTTypeText(text)
+					C.free(unsafe.Pointer(text))
+				}
 				time.Sleep(16 * time.Millisecond)
 			}
-			C.free(unsafe.Pointer(text))
 			continue
 		}
 		if action.keyCode > 0 {
@@ -326,13 +375,13 @@ func executeSnippetActions(actions []snippetAction, usePaste bool, generation ui
 			time.Sleep(12 * time.Millisecond)
 		}
 	}
-	return executionActive(generation)
+	return e.executionActive(generation)
 }
 
-func executionActive(generation uint64) bool {
-	keyboardEngine.mu.Lock()
-	defer keyboardEngine.mu.Unlock()
-	return keyboardEngine.running && keyboardEngine.generation == generation
+func (e *engine) executionActive(generation uint64) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.running && e.generation == generation
 }
 
 func renderSnippetActions(content string) []snippetAction {

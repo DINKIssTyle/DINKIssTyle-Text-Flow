@@ -8,7 +8,8 @@ import (
 )
 
 type Match struct {
-	Snippet storage.Snippet
+	Snippet           storage.Snippet
+	ConsumedDelimiter bool
 }
 
 type Matcher struct {
@@ -55,7 +56,8 @@ func (m *Matcher) Find(snippets []storage.Snippet, delimiterTyped bool) (Match, 
 		}
 
 		buffer := m.buffer
-		if delimiterTyped {
+		consumeDelimiter := snippet.ExpandMode == "delimiter" && delimiterTyped
+		if consumeDelimiter {
 			buffer = trimLastRune(buffer)
 		}
 		shortcut := snippet.Shortcut
@@ -64,7 +66,7 @@ func (m *Matcher) Find(snippets []storage.Snippet, delimiterTyped bool) (Match, 
 			shortcut = strings.ToLower(shortcut)
 		}
 		if strings.HasSuffix(buffer, shortcut) {
-			return Match{Snippet: snippet}, true
+			return Match{Snippet: snippet, ConsumedDelimiter: consumeDelimiter}, true
 		}
 	}
 	return Match{}, false

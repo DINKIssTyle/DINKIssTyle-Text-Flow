@@ -341,9 +341,9 @@ func handleKeyboardInput(input keyboardInput) {
 		return
 	}
 
-	deleteKeys := deleteKeysForMatch(buffer, text, match.Snippet.Shortcut, match.Snippet.CaseSensitive, delimiterTyped)
+	deleteKeys := deleteKeysForMatch(buffer, text, match.Snippet.Shortcut, match.Snippet.CaseSensitive, match.ConsumedDelimiter)
 	deleteCount := shortcutDeleteCount(deleteKeys)
-	if delimiterTyped && strings.HasSuffix(buffer, text) {
+	if match.ConsumedDelimiter && strings.HasSuffix(buffer, text) {
 		deleteCount += len([]rune(text))
 	}
 

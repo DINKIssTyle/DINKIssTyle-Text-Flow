@@ -394,6 +394,8 @@ func (a *App) reconcileFlowStatus(emit bool) platform.Status {
 		status.Message = "Flow is paused by the Flow toggle."
 	case !status.AccessibilityTrusted:
 		status.Message = "Accessibility permission is required before Flow can run."
+	case status.SecureInputActive:
+		status.Message = "Secure Input is blocking global expansion. Flow will resume when Secure Input ends."
 	case status.FlowEngineRunning:
 		status.Message = "Flow is active."
 	default:
@@ -414,7 +416,7 @@ func (a *App) reconcileFlowStatus(emit bool) platform.Status {
 		}
 		a.trayManager.UpdateState(tray.State{
 			FlowPaused:     paused,
-			Running:        status.FlowEngineRunning,
+			Running:        status.FlowEngineRunning && !status.SecureInputActive,
 			AIEnabled:      aiEnabled,
 			PinShotEnabled: pinShotEnabled,
 			OCREnabled:     ocrEnabled,

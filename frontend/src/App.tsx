@@ -381,6 +381,9 @@ function flowStatusDetail(status: PlatformStatus | null, t: Translator) {
     if (!status?.accessibilityTrusted) {
         return t('permissionPending');
     }
+    if (status.secureInputActive) {
+        return t('flowBlockedBySecureInput');
+    }
     if (!status?.flowEngineRunning) {
         return t('flowEngineUnavailable');
     }
@@ -3043,9 +3046,9 @@ function MainApp({ hudMode }: { hudMode: 'ai' | 'ocr' | null }) {
                     </button>
                 </div>
                 <div className="status-tile">
-                    <span className={platformStatus?.flowEngineRunning ? 'dot good' : 'dot idle'} />
+                    <span className={platformStatus?.flowEngineRunning && !platformStatus.secureInputActive ? 'dot good' : 'dot idle'} />
                     <div>
-                        <strong>{platformStatus?.flowEngineRunning ? t('flowActive') : t('flowPaused')}</strong>
+                        <strong>{platformStatus?.flowEngineRunning && !platformStatus.secureInputActive ? t('flowActive') : t('flowPaused')}</strong>
                         <span>{flowStatusDetail(platformStatus, t)}</span>
                     </div>
                 </div>
