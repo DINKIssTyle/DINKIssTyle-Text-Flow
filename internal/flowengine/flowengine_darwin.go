@@ -92,6 +92,15 @@ func Running() bool {
 	return keyboardEngine.running
 }
 
+// InvalidatePendingExpansion prevents a match captured before a snippet
+// mutation from being executed after that mutation completes.
+func InvalidatePendingExpansion() {
+	keyboardEngine.mu.Lock()
+	keyboardEngine.generation++
+	keyboardEngine.matcher.Reset()
+	keyboardEngine.mu.Unlock()
+}
+
 //export DKSTKeyboardInput
 func DKSTKeyboardInput(value *C.char, backspace C.int) {
 	keyboardEngine.mu.Lock()

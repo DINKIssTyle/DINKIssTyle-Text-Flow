@@ -235,7 +235,11 @@ func (a *App) UpdateSnippet(id int64, input storage.SnippetInput) (storage.Snipp
 }
 
 func (a *App) DeleteSnippet(id int64) error {
-	return a.store.DeleteSnippet(id)
+	if err := a.store.DeleteSnippet(id); err != nil {
+		return err
+	}
+	flowengine.InvalidatePendingExpansion()
+	return nil
 }
 
 func (a *App) ConfirmSnippetDeletion(title string) (bool, error) {

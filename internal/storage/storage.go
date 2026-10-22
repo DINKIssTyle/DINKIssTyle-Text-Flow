@@ -107,16 +107,41 @@ func Open(path string) (*Store, error) {
 	}
 
 	store := &Store{db: db}
+	hadSnippetTable, err := store.tableExists("snippets")
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := store.migrate(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := store.seed(); err != nil {
-		_ = db.Close()
-		return nil, err
+	// Seed example snippets only when the schema is created for the first time.
+	// An existing, empty snippets table means the user intentionally deleted
+	// every snippet and must remain empty after the application restarts.
+	if !hadSnippetTable {
+		if err := store.seed(); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
 	}
 
 	return store, nil
+}
+
+func (s *Store) tableExists(name string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM sqlite_master
+			WHERE type = 'table' AND name = ?
+		)
+	`, name).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 func (s *Store) Close() error {
